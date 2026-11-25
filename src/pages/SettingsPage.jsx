@@ -1,0 +1,295 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Lock, Newspaper, Trophy, LogOut, FlaskConical, Headphones, Activity, Coins, CreditCard, RotateCcw, ShieldCheck, AlertCircle } from 'lucide-react';
+import SettingsModal from '../components/SettingsModal';
+import Toggle from '../components/Toggle';
+import { useUserStore } from '../store/userStore';
+import { formatCardNumber, formatExpiry, luhnValid } from '../utils/format';
+
+export default function SettingsPage({ userData, onResetAccount }) {
+  const navigate = useNavigate();
+  const [modalType, setModalType] = useState(null);
+  // Режим карточной формы реального счёта.
+  const [cardForm, setCardForm] = useState({ number: '', expiry: '', cvv: '', holder: '' });
+  const [cardError, setCardError] = useState('');
+
+  const setBalance = useUserStore((s) => s.setBalance);
+  const resetStoreAccount = useUserStore((s) => s.resetAccount);
+  const setAccountMode = useUserStore((s) => s.setAccountMode);
+
+  const isReal = userData.accountMode === 'real';
+
+  // Пополнение баланса без перезагрузки страницы (через стор).
+  const addBalance = (amount) => {
+    setBalance((Number(userData.balance) || 0) + amount);
+  };
+
+  // Выход: сброс стора (вернёт онбординг), без location.reload().
+  const handleLogout = () => {
+    resetStoreAccount();
+  };
+
+  // ---- Реальный счёт: ввод карты ----
+  const activateRealAccount = () => {
+    setCardError('');
+    const digits = cardForm.number.replace(/\D/g, '');
+    if (!luhnValid(digits)) {
+      setCardError('Проверь номер карты — он введён неверно.');
+      return;
+    }
+    if (!/^\d{2}\/\d{2}$/.test(cardForm.expiry)) {
+      setCardError('Срок действия в формате ММ/ГГ.');
+      return;
+    }
+    if (!/^\d{3}$/.test(cardForm.cvv)) {
+      setCardError('CVV — 3 цифры.');
+      return;
+    }
+    if (cardForm.holder.trim().length < 2) {
+      setCardError('Укажи имя держателя карты.');
+      return;
+    }
+    // Переключаем режим на реальный; храним ТОЛЬКО маску (никогда не CVV/полный номер).
+    const mask = `•••• ${digits.slice(-4)}`;
+    setAccountMode('real', mask);
+    setModalType(null);
+    setCardForm({ number: '', expiry: '', cvv: '', holder: '' });
+  };
+
+  const switchToSandbox = () => {
+    setAccountMode('sandbox', null);
+    setModalType(null);
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto w-full pb-10">
+      <header className="flex items-center gap-4 mb-8">
+        <button onClick={() => navigate(-1)} className="p-2 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-full transition-colors text-gray-900 dark:text-white">
+           <ChevronLeft size={24} />
+        </button>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Настройки</h1>
+      </header>
+
+      <div className="space-y-6">
+        <div>
+          <p className="text-xs font-bold text-gray-500 mb-2 px-2">АККАУНТ</p>
+          <div onClick={() => setModalType('account')} className="p-4 rounded-2xl flex justify-between items-center bg-white dark:bg-[#1e1e1e] border border-gray-100 dark:border-gray-800 cursor-pointer hover:border-yellow-400 transition-colors">
+            <div className="flex items-center gap-3 text-gray-900 dark:text-white">
+              <CreditCard size={20} className="text-yellow-500" />
+              <div>
+                <p className="font-medium text-sm">Реальный счёт</p>
+                <p className="text-xs text-gray-500">
+                  {isReal ? `Подключён: ${userData.cardMask || 'реальный счёт'}` : 'Подключить Т-Инвестиции'}
+                </p>
+              </div>
+            </div>
+            <ChevronRight size={20} className="text-gray-400" />
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-bold text-gray-500 mb-2 px-2">БЕЗОПАСНОСТЬ</p>
+          <div className="p-4 rounded-2xl flex justify-between items-center bg-white dark:bg-[#1e1e1e] border border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-3 text-gray-900 dark:text-white">
+              <Lock size={20} />
+              <div>
+                <p className="font-medium text-sm">Face ID / Touch ID</p>
+                <p className="text-xs text-gray-500">Вход по биометрии</p>
+              </div>
+            </div>
+            <Toggle defaultChecked={true} />
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-bold text-gray-500 mb-2 px-2">УВЕДОМЛЕНИЯ</p>
+          <div className="rounded-2xl overflow-hidden bg-white dark:bg-[#1e1e1e] border border-gray-100 dark:border-gray-800">
+            <div className="p-4 flex justify-between items-center border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center gap-3 text-gray-900 dark:text-white">
+                <Newspaper size={20} />
+                <p className="font-medium text-sm">Новости рынка</p>
+              </div>
+              <Toggle defaultChecked={true} />
+            </div>
+            <div className="p-4 flex justify-between items-center">
+              <div className="flex items-center gap-3 text-gray-900 dark:text-white">
+                <Trophy size={20} />
+                <p className="font-medium text-sm">Достижения</p>
+              </div>
+              <Toggle defaultChecked={true} />
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-bold text-gray-500 mb-2 px-2">ПЕСОЧНИЦА (SANDBOX)</p>
+          <div onClick={() => setModalType('sandbox')} className="p-4 rounded-2xl flex justify-between items-center bg-white dark:bg-[#1e1e1e] border border-gray-100 dark:border-gray-800 cursor-pointer hover:border-yellow-400 transition-colors">
+            <div className="flex items-center gap-3 text-gray-900 dark:text-white">
+              <FlaskConical size={20} />
+              <div>
+                <p className="font-medium text-sm">Демо-счёт</p>
+                <p className="text-xs text-gray-500">Управление виртуальными средствами</p>
+              </div>
+            </div>
+            <ChevronRight size={20} className="text-gray-400" />
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-bold text-gray-500 mb-2 px-2">АНАЛИТИКА</p>
+          <div onClick={() => setModalType('analytics')} className="p-4 rounded-2xl flex justify-between items-center bg-white dark:bg-[#1e1e1e] border border-gray-100 dark:border-gray-800 cursor-pointer hover:border-yellow-400 transition-colors">
+            <div className="flex items-center gap-3 text-gray-900 dark:text-white">
+              <Activity size={20} />
+              <div>
+                <p className="font-medium text-sm">Лог действий</p>
+                <p className="text-xs text-gray-500">Проверить, куда кликают пользователи</p>
+              </div>
+            </div>
+            <ChevronRight size={20} className="text-gray-400" />
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-bold text-gray-500 mb-2 px-2">ПОМОЩЬ</p>
+          <div onClick={() => setModalType('support')} className="p-4 rounded-2xl flex justify-between items-center bg-white dark:bg-[#1e1e1e] border border-gray-100 dark:border-gray-800 cursor-pointer hover:border-yellow-400 transition-colors">
+            <div className="flex items-center gap-3 text-gray-900 dark:text-white">
+              <Headphones size={20} />
+              <div>
+                <p className="font-medium text-sm">Написать в поддержку</p>
+              </div>
+            </div>
+            <ChevronRight size={20} className="text-gray-400" />
+          </div>
+        </div>
+
+        <button onClick={onResetAccount} className="w-full p-4 rounded-2xl bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 font-bold flex items-center gap-3 hover:bg-yellow-500/20 transition-colors">
+           <RotateCcw size={20} /> Сбросить аккаунт и пройти онбординг заново
+        </button>
+
+        <button onClick={handleLogout} className="w-full p-4 rounded-2xl bg-red-500/10 text-red-500 font-bold flex items-center gap-3 hover:bg-red-500/20 transition-colors">
+           <LogOut size={20} /> Выйти из аккаунта
+        </button>
+      </div>
+
+      {modalType === 'account' && (
+        <SettingsModal title={isReal ? 'Реальный счёт подключён' : 'Подключение реального счёта'} onClose={() => setModalType(null)}>
+          {isReal ? (
+            <>
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-green-500/10 text-green-600 dark:text-green-400 text-sm mb-4">
+                <ShieldCheck size={18} className="shrink-0 mt-0.5" />
+                <span>Реальный режим активен. Привязанная карта: <strong>{userData.cardMask || '•••• ••••'}</strong>. Сделки идут по реальным котировкам.</span>
+              </div>
+              <button onClick={switchToSandbox} className="w-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white font-bold py-3 rounded-xl hover:opacity-90 transition-colors">
+                Вернуться в песочницу (демо)
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-gray-500 mb-4">
+                Чтобы торговать реальными деньгами, привяжи банковскую карту. Данные карты проверяются и не хранятся на сервере — сохраняется только последние 4 цифры.
+              </p>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 mb-1 block">Номер карты</label>
+                  <input
+                    inputMode="numeric"
+                    value={cardForm.number}
+                    onChange={(e) => setCardForm((f) => ({ ...f, number: formatCardNumber(e.target.value) }))}
+                    placeholder="0000 0000 0000 0000"
+                    className="w-full p-3 rounded-xl bg-gray-100 dark:bg-gray-800 outline-none text-gray-900 dark:text-white"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="text-xs font-bold text-gray-500 mb-1 block">Срок</label>
+                    <input
+                      inputMode="numeric"
+                      value={cardForm.expiry}
+                      onChange={(e) => setCardForm((f) => ({ ...f, expiry: formatExpiry(e.target.value) }))}
+                      placeholder="ММ/ГГ"
+                      className="w-full p-3 rounded-xl bg-gray-100 dark:bg-gray-800 outline-none text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs font-bold text-gray-500 mb-1 block">CVV</label>
+                    <input
+                      inputMode="numeric"
+                      type="password"
+                      value={cardForm.cvv}
+                      onChange={(e) => setCardForm((f) => ({ ...f, cvv: e.target.value.replace(/\D/g, '').slice(0, 3) }))}
+                      placeholder="•••"
+                      className="w-full p-3 rounded-xl bg-gray-100 dark:bg-gray-800 outline-none text-gray-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 mb-1 block">Имя держателя</label>
+                  <input
+                    value={cardForm.holder}
+                    onChange={(e) => setCardForm((f) => ({ ...f, holder: e.target.value }))}
+                    placeholder="IVAN IVANOV"
+                    className="w-full p-3 rounded-xl bg-gray-100 dark:bg-gray-800 outline-none text-gray-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              {cardError && (
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 text-red-500 text-sm mt-3">
+                  <AlertCircle size={18} className="shrink-0 mt-0.5" />
+                  <span>{cardError}</span>
+                </div>
+              )}
+
+              <button
+                onClick={activateRealAccount}
+                className="w-full bg-yellow-400 text-black font-bold py-3 rounded-xl hover:bg-yellow-500 transition-colors mt-4 flex items-center justify-center gap-2"
+              >
+                <CreditCard size={18} /> Подключить реальный счёт
+              </button>
+              <p className="text-center text-[10px] text-gray-400 mt-3">
+                Демонстрационный поток: реальное подключение к брокеру требует OAuth в проде.
+              </p>
+            </>
+          )}
+        </SettingsModal>
+      )}
+
+      {modalType === 'sandbox' && (
+        <SettingsModal title="Песочница" onClose={() => setModalType(null)}>
+          <div className="text-center mb-6">
+            <p className="text-sm text-gray-500 mb-2">Текущий баланс:</p>
+            <p className="text-4xl font-bold text-yellow-500">{userData.balance} ₽</p>
+          </div>
+          <button onClick={() => {
+            addBalance(1000);
+            setModalType(null);
+          }} className="w-full flex items-center justify-center gap-2 bg-yellow-400 text-black font-bold py-3 rounded-xl hover:bg-yellow-500 transition-colors">
+            <Coins size={20} /> Получить 1000 ₽
+          </button>
+        </SettingsModal>
+      )}
+
+      {modalType === 'analytics' && (
+        <SettingsModal title="Аналитика действий" onClose={() => setModalType(null)}>
+          <div className="max-h-60 overflow-y-auto bg-gray-100 dark:bg-gray-800 p-3 rounded-xl text-xs space-y-2">
+            {(userData.analytics || []).length === 0 ? <p className="text-gray-500">Пока пусто.</p> : null}
+            {(userData.analytics || []).map((log, i) => (
+              <div key={i} className="flex justify-between border-b border-gray-200 dark:border-gray-700 pb-1">
+                <span className="font-medium text-gray-900 dark:text-gray-300">{log.event}</span>
+                <span className="text-gray-500">{log.time}</span>
+              </div>
+            ))}
+          </div>
+        </SettingsModal>
+      )}
+
+      {modalType === 'support' && (
+        <SettingsModal title="Поддержка" onClose={() => setModalType(null)}>
+          <textarea placeholder="Ваше сообщение..." className="w-full h-32 p-3 rounded-xl bg-gray-100 dark:bg-gray-800 border-none outline-none resize-none mb-4 text-gray-900 dark:text-white"></textarea>
+          <button className="w-full bg-yellow-400 text-black font-bold py-3 rounded-xl hover:bg-yellow-500 transition-colors" onClick={() => setModalType(null)}>Отправить</button>
+        </SettingsModal>
+      )}
+    </div>
+  );
+}

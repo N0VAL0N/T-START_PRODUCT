@@ -1,0 +1,38 @@
+{
+  "name": "t-start-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev-all.mjs",
+    "dev:web": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "server": "node server/index.mjs",
+    "dev:full": "node scripts/dev-all.mjs",
+    "test:integrations": "node scripts/check-integrations.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "idb-keyval": "^6.3.0",
+    "lucide-react": "^1.76.0",
+    "motion": "^14.14.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.6",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "eslint": "^10.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.13.0",
+    "tailwindcss": "^4.3.5",
+    "vite": "^8.3.6"
+  }
+}

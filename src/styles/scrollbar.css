@@ -1,0 +1,47 @@
+/* ===== Кастомный скроллбар в тонах приложения (T-Start) =====
+   Заменяет «глазастый» системный скроллбар на аккуратный жёлто-тёмный. */
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(234, 179, 8, 0.45) transparent;
+}
+
+/* WebKit (Chrome/Edge/Safari/Opera) */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(234, 179, 8, 0.35); /* yellow-500 прозрачный */
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  transition: background-color 0.2s;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(234, 179, 8, 0.6);
+}
+
+/* В тёмной теме — скроллбар на тёмном треке */
+.dark *::-webkit-scrollbar-thumb {
+  background-color: rgba(234, 179, 8, 0.4);
+}
+.dark *::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(234, 179, 8, 0.7);
+}
+
+/* По желанию — скрыть скроллбар (для горизонтальных лент) */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

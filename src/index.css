@@ -1,0 +1,65 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Плавное появление (используется как animate-fade-in). */
+@theme {
+  --animate-fade-in: fade-in 0.35s ease-out both;
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ============================================================
+   Премиум-утилиты (обе темы). Вынесены сюда, чтобы не дублировать
+   длинные tailwind-цепочки в Story и Market.
+   ============================================================ */
+
+@layer components {
+  /* «Кинематографичный» фон экрана главы: тёмный + тёплое свечение снизу. */
+  .story-stage {
+    @apply bg-[#0c0a09];
+  }
+  .story-stage::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at bottom, rgba(120, 88, 20, 0.45), transparent 60%);
+  }
+  /* Светлая версия сцены — мягкий тёпло-кремовый фон. */
+  .story-stage:where(html:not(.dark) *) {
+    @apply bg-[#faf6ec];
+  }
+  .story-stage:where(html:not(.dark) *)::before {
+    background: radial-gradient(ellipse at bottom, rgba(250, 204, 21, 0.25), transparent 65%);
+  }
+
+  /* Карточка-«пергамент» для реплик в Story: тёмная и светлая. */
+  .story-panel {
+    @apply bg-[#1a1a1a]/90 border border-yellow-900/30 backdrop-blur-xl;
+  }
+  .story-panel:where(html:not(.dark) *) {
+    @apply bg-white/85 border-yellow-500/25 shadow-xl;
+  }
+
+  /* Skeleton-заглушка строки при загрузке котировок. */
+  .skeleton {
+    @apply rounded-lg bg-gray-200/70 dark:bg-gray-800/70;
+    background-image: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+  }
+  .dark .skeleton {
+    background-image: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
+  }
+}
+
+@import "./styles/scrollbar.css";
