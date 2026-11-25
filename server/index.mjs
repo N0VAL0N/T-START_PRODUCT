@@ -635,7 +635,6 @@ function send(res, status, obj) {
   });
   res.end(body);
 }
-
 function readBody(req) {
   return new Promise((resolve) => {
     let data = '';
@@ -657,7 +656,8 @@ async function handleQuotes(url, res) {
   return send(res, 200, { quotes });
 }
 
-const server = createServer(async (req, res) => {
+// ---------- HTTP приложение (переиспользуется локальным сервером и Vercel-функцией) ----------
+export async function handler(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname;
 
@@ -768,13 +768,19 @@ const server = createServer(async (req, res) => {
     console.error('[api error]', path, e.message);
     return send(res, 500, { error: e.message });
   }
-});
+}
 
-server.listen(PORT, () => {
-  console.log(`T-Start backend on http://localhost:${PORT}`);
-  console.log(`  AI ready:     ${AI_READY} (DeepSeek, model=${MODEL})`);
-  console.log(`  Invest ready: ${INVEST_READY}`);
-  if (!AI_READY) console.log('  [!] Нет ключа DeepSeek (VITE_DEEPSEEK_API_KEY=sk-...) — AI-чат вернёт заглушку');
-  if (INSECURE_TLS) console.log('  [!] TLS verification disabled (TSTART_INSECURE_TLS=1) — dev only');
-});
+// ---------- Локальный запуск (только когда файл запущен напрямую, не при импорте Vercel) ----------
+const isDirectRun =
+  process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isDirectRun) {
+  createServer(handler).listen(PORT, () => {
+    console.log(`T-Start backend on http://localhost:${PORT}`);
+    console.log(`  AI ready:     ${AI_READY} (DeepSeek, model=${MODEL})`);
+    console.log(`  Invest ready: ${INVEST_READY}`);
+    if (!AI_READY) console.log('  [!] Нет ключа DeepSeek (VITE_DEEPSEEK_API_KEY=sk-...) — AI-чат вернёт заглушку');
+    if (INSECURE_TLS) console.log('  [!] TLS verification disabled (TSTART_INSECURE_TLS=1) — dev only');
+  });
+}
 
