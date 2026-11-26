@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { ArrowLeft, Trophy, TrendingUp, TrendingDown, UserPlus, Copy, Check, Trash2, Link2, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQuotes } from '../hooks/useQuotes';
 import { fmtChange1 } from '../utils/format';
+import { useUserStore } from '../store/userStore';
 
 // Соревнование между друзьями, которых приглашаешь сам.
 // Доходность: моя — по реальным котировкам портфеля; друзей — по реальной
@@ -65,6 +66,16 @@ export default function Tournament({ userData, updateUserData, trackEvent }) {
 
   const myPlace = leaderboard.find((u) => u.isYou)?.place ?? '—';
   const fmt = fmtChange1;
+
+  // Победа (1-е место при ≥2 участниках) открывает наряд «Чемпион».
+  const setTournamentBestPlace = useUserStore((s) => s.setTournamentBestPlace);
+  const syncOutfits = useUserStore((s) => s.syncOutfits);
+  useEffect(() => {
+    if (leaderboard.length >= 2 && myPlace === 1) {
+      setTournamentBestPlace(1);
+      syncOutfits();
+    }
+  }, [myPlace, leaderboard.length, setTournamentBestPlace, syncOutfits]);
 
   const addFriend = (e) => {
     e.preventDefault();

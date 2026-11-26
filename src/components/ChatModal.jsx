@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { X, Send, ShieldCheck, TrendingUp, Wallet } from 'lucide-react';
-import cubeSmall from '../assets/cube-small.png';
+import Mascot from './Mascot';
+import { useUserStore } from '../store/userStore';
 import { askAssistant, isAiConfigured } from '../services/ai';
 import { tradeByTicker } from '../services/invest';
 import { useQuotes } from '../hooks/useQuotes';
@@ -12,6 +13,7 @@ let __msgSeq = 0;
 const nextMsgId = () => `${Date.now()}-${__msgSeq++}`;
 
 export default function ChatModal({ onClose, userData, executeTrade, trackEvent }) {
+  const activeOutfit = useUserStore((s) => s.userData?.activeOutfit);
   const [messages, setMessages] = useState([
     { id: 1, sender: 'ai', type: 'text', text: 'Привет! Я Ти-Стартик. Помогу собрать портфель. Спроси, например: "У меня есть 500 рублей, что купить?"' }
   ]);
@@ -184,9 +186,9 @@ export default function ChatModal({ onClose, userData, executeTrade, trackEvent 
       <div className="w-full max-w-lg rounded-3xl p-6 flex flex-col h-[600px] max-h-[90vh] bg-white dark:bg-[#1e1e1e] border border-gray-100 dark:border-gray-800">
 
         <div className="flex justify-between items-center mb-4 border-b pb-4 border-gray-100 dark:border-gray-800">
-          <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-[#fdf8eb] dark:bg-[#2a2416] rounded-xl flex items-center justify-center shrink-0">
-              <img src={cubeSmall} alt="Cube" className="w-8 h-8 object-contain" />
+              <Mascot outfitId={activeOutfit} size={32} />
             </div>
             <div>
               <h3 className="font-bold text-lg text-gray-900 dark:text-white">Ти-Стартик</h3>
@@ -201,7 +203,7 @@ export default function ChatModal({ onClose, userData, executeTrade, trackEvent 
             <div key={msg.id} className={`flex items-start gap-3 ${msg.sender === 'user' ? 'justify-end' : ''}`}>
               {msg.sender === 'ai' && (
                 <div className="w-8 h-8 bg-[#fdf8eb] dark:bg-[#2a2416] rounded-lg flex items-center justify-center shrink-0">
-                  <img src={cubeSmall} alt="Cube" className="w-6 h-6 object-contain" />
+                  <Mascot outfitId={activeOutfit} size={24} />
                 </div>
               )}
 
@@ -299,7 +301,7 @@ export default function ChatModal({ onClose, userData, executeTrade, trackEvent 
           {isThinking && (
             <div className="flex items-start gap-3">
               <div className="w-8 h-8 bg-[#fdf8eb] dark:bg-[#2a2416] rounded-lg flex items-center justify-center shrink-0">
-                <img src={cubeSmall} alt="Cube" className="w-6 h-6 object-contain" />
+                <Mascot outfitId={activeOutfit} size={24} />
               </div>
               <div className="p-4 rounded-2xl rounded-tl-none bg-gray-100 dark:bg-gray-800 text-gray-500 text-sm">
                 Ти-Стартик печатает<span className="animate-pulse">...</span>

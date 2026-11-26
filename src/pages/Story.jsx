@@ -9,10 +9,12 @@ import {
 import { CHAPTERS } from '../data/chapters';
 import { computeReadiness } from '../utils/readiness';
 import { isInvestConfigured } from '../services/invest';
-import cubeSmall from '../assets/cube-small.png';
+import Mascot from '../components/Mascot';
+import { useUserStore } from '../store/userStore';
 
 export default function Story({ userData, trackEvent, chaptersDone = [], onChapterComplete, onOpenRealAccount }) {
   const navigate = useNavigate();
+  const activeOutfit = useUserStore((s) => s.userData?.activeOutfit);
   
   const [expanded, setExpanded] = useState(null);
   const [chapter, setChapter] = useState(null);
@@ -262,7 +264,7 @@ export default function Story({ userData, trackEvent, chaptersDone = [], onChapt
 
               <div className="flex items-start gap-4 mb-6">
                 <div className="w-14 h-14 bg-[#fdf8eb] rounded-2xl flex items-center justify-center shrink-0 shadow-[0_0_20px_rgba(250,204,21,0.2)]">
-                  <img src={cubeSmall} alt="Cube" className="w-10 h-10 object-contain" />
+                  <Mascot outfitId={activeOutfit} size={40} />
                 </div>
                 <div>
                    <h2 className="text-yellow-600 dark:text-yellow-500 font-serif text-xl font-bold tracking-wide">{chapter.title}</h2>

@@ -13,6 +13,7 @@ const Profile = lazy(() => import('./pages/Profile'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const Tournament = lazy(() => import('./pages/Tournament'));
 const Story = lazy(() => import('./pages/Story'));
+const Wardrobe = lazy(() => import('./pages/Wardrobe'));
 const ChatModal = lazy(() => import('./components/ChatModal'));
 
 // Плейсхолдер на время подгрузки ленивого чанка.
@@ -42,12 +43,20 @@ export default function App() {
   const setSandboxAccountId = useUserStore((s) => s.setSandboxAccountId);
   const setUserDataAction = useUserStore((s) => s.setUserData);
   const resetAccountAction = useUserStore((s) => s.resetAccount);
+  const syncOutfits = useUserStore((s) => s.syncOutfits);
 
   // Тема → класс на <html>.
   useEffect(() => {
     if (isDark) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [isDark]);
+
+  // После загрузки данных — пересчитать открытые наряды по уже заработанным
+  // достижениям (сделки/портфель/главы могли быть получены до появления нарядов).
+  useEffect(() => {
+    if (hasHydrated && userData) syncOutfits();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasHydrated]);
 
   // Событие аналитики (лимит 50 событий — внутри стора).
   const trackEvent = (eventName) => trackEventAction(eventName);
@@ -68,6 +77,8 @@ export default function App() {
 
   const handleChapterComplete = (chapterId) => {
     completeChapterAction(chapterId);
+    // Прохождение главы может открыть наряд — пересчитываем.
+    syncOutfits();
   };
 
   // Открытие счёта Т-Инвест (песочница): бэкенд переиспользует существующий счёт.
@@ -89,7 +100,11 @@ export default function App() {
     resetAccountAction();
   };
 
-  const executeTrade = (stock, price) => executeTradeAction(stock, price);
+  const executeTrade = (stock, price) => {
+    executeTradeAction(stock, price);
+    // Сделка может открыть наряд «Трейдер» и др.
+    syncOutfits();
+  };
   const updateAvatar = (base64) => updateAvatarAction(base64);
 
   // Пока IndexedDB не прочитан — показываем экран загрузки, а НЕ онбординг,
@@ -116,7 +131,8 @@ export default function App() {
                 <ErrorBoundary>
                   <Routes>
                     <Route path="/" element={<Dashboard userData={userData} onOpenChat={() => setIsChatOpen(true)} trackEvent={trackEvent} />} />
-                    <Route path="/market" element={<Market onOpenChat={() => setIsChatOpen(true)} trackEvent={trackEvent} />} />
+                    <Route path="/market" element={<Market onOpenChat={() => setIsChatOpen(true)} trackEvent={trackEvent} userData={userData} activeOutfit={userData?.activeOutfit} />} />
+                    <Route path="/wardrobe" element={<Wardrobe />} />
                     <Route path="/profile" element={<Profile userData={userData} updateAvatar={updateAvatar} />} />
                     <Route path="/settings" element={<SettingsPage userData={userData} onResetAccount={resetAccount} />} />
                     <Route path="/tournament" element={<Tournament userData={userData} updateUserData={setUserDataAction} trackEvent={trackEvent} />} />

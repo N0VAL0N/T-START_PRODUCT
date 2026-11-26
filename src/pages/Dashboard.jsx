@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Trophy, Plus, TrendingUp, TrendingDown, Flame, Loader2 } from 'lucide-react';
-import cubeHero from '../assets/cube-hero.png';
-import cubeSmall from '../assets/cube-small.png';
+import Mascot from '../components/Mascot';
 import { useQuotes } from '../hooks/useQuotes';
 import DepositModal from '../components/DepositModal';
 import { useUserStore } from '../store/userStore';
@@ -147,7 +146,7 @@ export default function Dashboard({ userData, onOpenChat, trackEvent }) {
         onClick={() => { trackEvent('Открыт чат ассистента'); onOpenChat?.(); }}
         className="p-4 rounded-3xl flex items-center gap-4 cursor-pointer hover:opacity-90 transition-opacity bg-[#fdf8eb] dark:bg-[#2a2416] border border-yellow-100 dark:border-yellow-900/30"
       >
-        <img src={cubeSmall} alt="Маскот" className="w-16 h-16 object-contain" />
+        <Mascot outfitId={userData.activeOutfit} size={64} />
         <div className="flex-1">
           <h3 className="font-bold text-lg text-gray-900 dark:text-white">T-Start Ассистент</h3>
           <p className="text-sm text-gray-600 dark:text-gray-400">Привет! Я помогу собрать портфель с нуля. Нажми на меня.</p>
@@ -159,7 +158,7 @@ export default function Dashboard({ userData, onOpenChat, trackEvent }) {
         onClick={() => { trackEvent('Переход в Историю с героя'); navigate('/story'); }}
         className="flex flex-col items-center justify-center mt-12 mb-8 cursor-pointer hover:scale-105 transition-transform"
       >
-        <img src={cubeHero} alt="Hero Cube" className="w-32 h-32 md:w-48 md:h-48 object-contain animate-bounce" />
+        <Mascot outfitId={userData.activeOutfit} size={160} className="animate-bounce" />
         <p className="text-yellow-600 dark:text-yellow-500 font-medium mt-4 text-sm md:text-base">Готов отправиться в путешествие по миру Инвестиций</p>
       </div>
 

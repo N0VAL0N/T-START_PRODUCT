@@ -14,6 +14,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { get, set, del } from 'idb-keyval';
+import { initialOutfits, computeUnlocked } from '../data/outfits';
 
 const ANALYTICS_LIMIT = 50;
 const STORAGE_KEY = 't-start-data';
@@ -76,6 +77,12 @@ function normalizeUserData(data) {
     accountMode: data.accountMode === 'real' ? 'real' : 'sandbox',
     // Маска карты для «реального» режима (напр. «•••• 4242»). Только маскированные данные.
     cardMask: data.cardMask || null,
+    // ---------- наряды маскота ----------
+    // Надетый сейчас наряд и список открытых (по умолчанию — только базовый).
+    activeOutfit: typeof data.activeOutfit === 'string' ? data.activeOutfit : 'default',
+    unlockedOutfits: Array.isArray(data.unlockedOutfits) ? data.unlockedOutfits : initialOutfits(),
+    // Лучшее место в дружеском вызове (1 = победа → открывает наряд «Чемпион»).
+    tournamentBestPlace: Number(data.tournamentBestPlace) || null,
   };
 }
 
@@ -120,6 +127,9 @@ export const useUserStore = create(
             friendInvites: [],
             accountMode: 'sandbox',
             cardMask: null,
+            activeOutfit: 'default',
+            unlockedOutfits: initialOutfits(),
+            tournamentBestPlace: null,
           },
         }),
 
@@ -192,6 +202,39 @@ export const useUserStore = create(
       // Замена части userData (для Tournament и точечных обновлений).
       patchUserData: (patch) =>
         set((s) => (s.userData ? { userData: { ...s.userData, ...patch } } : s)),
+
+      // ---------- наряды маскота ----------
+      // Надеть наряд (только если открыт).
+      equipOutfit: (outfitId) =>
+        set((s) => {
+          if (!s.userData) return s;
+          const unlocked = s.userData.unlockedOutfits || initialOutfits();
+          if (!unlocked.includes(outfitId)) return s;
+          return { userData: { ...s.userData, activeOutfit: outfitId } };
+        }),
+
+      // Пересчитать открытые наряды по достижениям и вернуть список новых.
+      // Вызывается после значимых событий (глава, сделка, пополнение, турнир).
+      syncOutfits: () => {
+        let newly = [];
+        set((s) => {
+          if (!s.userData) return s;
+          const { unlocked, newlyUnlocked } = computeUnlocked(s.userData);
+          newly = newlyUnlocked;
+          if (!newlyUnlocked.length) return s;
+          return { userData: { ...s.userData, unlockedOutfits: unlocked } };
+        });
+        return newly;
+      },
+
+      // Сохранить лучшее место в турнире (1 = победа).
+      setTournamentBestPlace: (place) =>
+        set((s) => {
+          if (!s.userData) return s;
+          const prev = Number(s.userData.tournamentBestPlace) || null;
+          const best = place && (!prev || place < prev) ? place : prev;
+          return { userData: { ...s.userData, tournamentBestPlace: best } };
+        }),
 
       // Полная замена (используется Tournament/Story, где передаётся весь объект).
       setUserData: (userData) => set({ userData: normalizeUserData(userData) }),

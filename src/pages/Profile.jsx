@@ -1,7 +1,7 @@
 import { useRef } from 'react';
-import { Settings, Pencil, Trophy, Coins, BookOpen, Star } from 'lucide-react';
+import { Settings, Pencil, Trophy, Coins, BookOpen, Star, Shirt } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import cubeIcon from '../assets/cube-small.png';
+import Mascot from '../components/Mascot';
 
 export default function Profile({ userData, updateAvatar }) {
   const navigate = useNavigate();
@@ -31,10 +31,10 @@ export default function Profile({ userData, updateAvatar }) {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
             <div className="w-20 h-20 rounded-2xl relative overflow-hidden bg-yellow-400 flex items-center justify-center">
-               {userData.avatar ? (
+                              {userData.avatar ? (
                  <img src={userData.avatar} alt="Avatar" className="w-full h-full object-cover" />
                ) : (
-                 <img src={cubeIcon} alt="Default Avatar" className="w-16 h-16 object-contain" />
+                 <Mascot outfitId={userData.activeOutfit} size={64} />
                )}
             </div>
             <div>
@@ -52,7 +52,7 @@ export default function Profile({ userData, updateAvatar }) {
           Уровень 1 - Новичок
         </div>
 
-        <div>
+                <div>
           <div className="flex justify-between text-xs mb-1 text-gray-500">
             <span>Путь к следующему уровню</span>
             <span className="font-bold text-gray-900 dark:text-white">0%</span>
@@ -61,6 +61,13 @@ export default function Profile({ userData, updateAvatar }) {
             <div className="bg-yellow-400 h-2 rounded-full" style={{ width: '0%' }}></div>
           </div>
         </div>
+
+        <button
+          onClick={() => navigate('/wardrobe')}
+          className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-yellow-400 text-black font-bold hover:bg-yellow-500 transition-colors"
+        >
+          <Shirt size={18} /> Гардероб
+        </button>
       </div>
 
       <div className="flex justify-between items-center mb-3">

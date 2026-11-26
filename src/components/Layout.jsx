@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom';
-import { Home, BarChart2, User, Settings, Sun, Moon, BookOpen } from 'lucide-react';
+import { Home, BarChart2, User, Settings, Sun, Moon, BookOpen, Shirt } from 'lucide-react';
 
 export default function Layout({ children, isDark, setIsDark }) {
   const navItems = [
     { path: '/', label: 'Главная', icon: Home },
     { path: '/story', label: 'Путешествие', icon: BookOpen },
     { path: '/market', label: 'Рынок', icon: BarChart2 },
+    { path: '/wardrobe', label: 'Гардероб', icon: Shirt },
     { path: '/profile', label: 'Профиль', icon: User },
     { path: '/settings', label: 'Настройки', icon: Settings },
   ];
