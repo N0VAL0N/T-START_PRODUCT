@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Bot, ChevronRight, AlertTriangle, Loader2, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
-import { fetchQuotes } from '../services/invest';
+import { fetchQuotes, fetchShares } from '../services/invest';
 import { fmtPrice, fmtChange } from '../utils/format';
 
-// Рынок берёт реальный список акций песочницы из /api/quotes (без параметров).
+// Рынок грузится ПОЭТАПНО (чтобы не упираться в таймаут шлюза на большом ответе):
+//  1) /api/shares — лёгкий справочник (тикер+имя+лот) → сразу рисуем карточки;
+//  2) цены — пачками по CHUNK тикеров через /api/quotes?tickers=..., чанки идут
+//     параллельно и мержатся в состояние по мере готовности.
 // Без моков: что вернул брокер — то и показываем. Локальный поиск по списку.
 const REFRESH_MS = 60_000;
+const CHUNK = 6;          // сколько тикеров в одном запросе цен
+const MAX_PARALLEL = 3;   // сколько чанков грузим одновременно
 
 // Риск → аккуратный бейдж с точкой-индикатором (обе темы).
 const RISK_STYLE = {
@@ -101,28 +106,97 @@ export default function Market({ onOpenChat, trackEvent }) {
   const filters = ['Все', 'Безопасные', 'Мои активы'];
   const [activeFilter, setActiveFilter] = useState('Все');
   const [query, setQuery] = useState('');
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState([]);          // [{ticker,name,lot,price,...}]
+  const [loading, setLoading] = useState(true);  // идёт первичная загрузка справочника/цен
+  const [refreshing, setRefreshing] = useState(false); // идёт догрузка цен
   const [error, setError] = useState(null);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
+    cancelledRef.current = false;
+
+    // Мерж: обновляем/добавляем котировки в список по тикеру (поэтапно).
+    const mergeQuotes = (quotes) => {
+      if (cancelledRef.current || !quotes?.length) return;
+      setRows((prev) => {
+        const map = new Map(prev.map((r) => [r.ticker, r]));
+        for (const q of quotes) {
+          const base = map.get(q.ticker) || { ticker: q.ticker, name: q.ticker, lot: q.lot };
+          map.set(q.ticker, { ...base, ...q });
+        }
+        // сохраняем порядок по тикеру
+        return [...map.values()].sort((a, b) => a.ticker.localeCompare(b.ticker));
+      });
+    };
+
+    // Грузим пачку тикеров -> котировки. Возвращает true при успехе.
+    const loadChunk = async (tickers) => {
       try {
-        const arr = await fetchQuotes(); // весь реальный список акций песочницы
-        if (!cancelled) { setRows(arr); setError(null); }
-      } catch (e) {
-        if (!cancelled) setError(e.message);
-      } finally {
-        if (!cancelled) setLoading(false);
+        const arr = await fetchQuotes(tickers);
+        mergeQuotes(arr);
+        return true;
+      } catch {
+        return false;
       }
     };
-    load();
-    const id = setInterval(load, REFRESH_MS);
-    const onVisibility = () => { if (!document.hidden) load(); };
+
+    // Загрузить цены по всем тикерам чанками (параллельно с ограничением).
+    const loadAllPrices = async (tickers) => {
+      const chunks = [];
+      for (let i = 0; i < tickers.length; i += CHUNK) chunks.push(tickers.slice(i, i + CHUNK));
+
+      let anyOk = false;
+      for (let i = 0; i < chunks.length; i += MAX_PARALLEL) {
+        if (cancelledRef.current) return;
+        const group = chunks.slice(i, i + MAX_PARALLEL);
+        const results = await Promise.all(group.map(loadChunk));
+        if (results.some(Boolean)) anyOk = true;
+      }
+      return anyOk;
+    };
+
+    const run = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        // Шаг 1 — справочник (быстрый). Рисуем скелет→карточки без цен.
+        const shares = await fetchShares();
+        if (cancelledRef.current) return;
+        if (Array.isArray(shares) && shares.length) {
+          setRows(shares.map((s) => ({ ticker: s.ticker, name: s.name, lot: s.lot, price: null, change: null })));
+          setLoading(false); // карточки видимы, цены догружаются ниже
+        }
+        // Шаг 2 — цены чанками.
+        const tickers = (shares?.length ? shares.map((s) => s.ticker) : []);
+        setRefreshing(true);
+        const ok = tickers.length ? await loadAllPrices(tickers) : false;
+        if (!ok && !tickers.length) throw new Error('NO_TICKERS');
+      } catch (e) {
+        if (!cancelledRef.current) setError(e.message);
+      } finally {
+        if (!cancelledRef.current) { setLoading(false); setRefreshing(false); }
+      }
+    };
+
+    // Обновление цен (по уже известному списку) — для таймера/фокуса.
+    const refreshPrices = async () => {
+      const tickers = rows.map((r) => r.ticker);
+      if (!tickers.length) { run(); return; }
+      setRefreshing(true);
+      await loadAllPrices(tickers);
+      if (!cancelledRef.current) setRefreshing(false);
+    };
+
+    run();
+    const id = setInterval(refreshPrices, REFRESH_MS);
+    const onVisibility = () => { if (!document.hidden) refreshPrices(); };
     document.addEventListener('visibilitychange', onVisibility);
-    return () => { cancelled = true; clearInterval(id); document.removeEventListener('visibilitychange', onVisibility); };
+    return () => {
+      cancelledRef.current = true;
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Фильтрация: по категории + локальный поиск по тикеру/имени (без доп. запросов).
@@ -137,6 +211,7 @@ export default function Market({ onOpenChat, trackEvent }) {
   }, [rows, activeFilter, query]);
 
   const firstLoad = loading && rows.length === 0;
+  const busy = loading || refreshing;
 
   return (
     <div className="max-w-6xl mx-auto w-full">
@@ -149,8 +224,8 @@ export default function Market({ onOpenChat, trackEvent }) {
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Реальные котировки и оценка риска из API Т-Инвест.</p>
           </div>
           <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 bg-white/70 dark:bg-[#1a1a1a] border border-gray-100 dark:border-gray-800 px-3 py-1.5 rounded-full backdrop-blur">
-            <span className={`w-2 h-2 rounded-full ${loading ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`} />
-            {loading ? 'Обновление…' : 'Онлайн'}
+            <span className={`w-2 h-2 rounded-full ${busy ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`} />
+            {busy ? 'Обновление…' : 'Онлайн'}
           </div>
         </div>
       </header>
@@ -188,7 +263,7 @@ export default function Market({ onOpenChat, trackEvent }) {
             placeholder="Поиск по тикеру или названию"
             className="bg-transparent outline-none w-full text-sm text-gray-900 dark:text-white placeholder-gray-500"
           />
-          {loading && <Loader2 size={16} className="animate-spin text-yellow-500 shrink-0" />}
+          {refreshing && <Loader2 size={16} className="animate-spin text-yellow-500 shrink-0" />}
         </div>
       </div>
 

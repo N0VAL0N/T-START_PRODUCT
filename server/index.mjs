@@ -808,11 +808,10 @@ async function handleQuotes(url, res) {
     // Ограничиваем одним батчем, чтобы не превысить таймаут функции.
     tickers = all.slice(0, 24).map((s) => s.ticker);
   }
-  const quotes = [];
-  for (const t of tickers) {
-    try { quotes.push(await getQuote(t)); }
-    catch { quotes.push({ ticker: t, name: t, price: null, priceExact: null, change: null, riskLevel: null, riskNote: 'нет данных' }); }
-  }
+  const quotes = await Promise.all(tickers.map(async (t) => {
+    try { return await getQuote(t); }
+    catch { return { ticker: t, name: t, price: null, priceExact: null, change: null, riskLevel: null, riskNote: 'нет данных' }; }
+  }));
   return send(res, 200, { quotes });
 }
 
