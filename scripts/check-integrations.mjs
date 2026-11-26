@@ -31,12 +31,9 @@ function loadEnv() {
 
 const env = loadEnv();
 
-// Корпоративный прокси подменяет сертификат (SELF_SIGNED_CERT_IN_CHAIN).
-// Для локальной проверки можно отключить проверку TLS: TSTART_INSECURE_TLS=1 в .env.
-if (env.TSTART_INSECURE_TLS === '1') {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  console.log('\x1b[33m[!] TLS-проверка отключена (TSTART_INSECURE_TLS=1) — только для локальной проверки\x1b[0m');
-}
+// TLS-проверка ВСЕГДА включена. Если корпоративный прокси подменяет сертификат —
+// используйте стандартную NODE_EXTRA_CA_CERTS=/путь/к/ca.pem (проверка при этом сохраняется).
+// Глобальное отключение проверки (NODE_TLS_REJECT_UNAUTHORIZED=0) запрещено.
 
 let passed = 0;
 let failed = 0;
@@ -49,12 +46,12 @@ function skip(name, why) { skipped++; console.log(`  \x1b[33m○\x1b[0m ${name} 
 // ---------- 1. DeepSeek (OpenAI-совместимый API) ----------
 async function testDeepSeek() {
   console.log('\n【DeepSeek AI】');
-  const key = env.VITE_DEEPSEEK_API_KEY || env.DEEPSEEK_API_KEY;
-  const base = env.VITE_DEEPSEEK_API_URL || env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
-  const model = env.VITE_DEEPSEEK_MODEL || env.DEEPSEEK_MODEL || 'deepseek-flash';
+  const key = env.DEEPSEEK_API_KEY;
+  const base = env.DEEPSEEK_API_URL || 'https://api.deepseek.com';
+  const model = env.DEEPSEEK_MODEL || 'deepseek-chat';
 
   if (!key || key.startsWith('your-')) {
-    skip('Ключ не задан', 'задай VITE_DEEPSEEK_API_KEY=sk-... в .env');
+    skip('Ключ не задан', 'задай DEEPSEEK_API_KEY=sk-... в .env');
     return;
   }
   if (!key.startsWith('sk-')) {
@@ -97,13 +94,13 @@ async function testDeepSeek() {
 // ---------- 2. Песочница T-Invest ----------
 async function testSandbox() {
   console.log('\n【Песочница T-Invest】');
-  const token = env.VITE_TINVEST_TOKEN;
-  const base = env.VITE_TINVEST_SANDBOX_URL || 'https://sandbox-invest-public-api.tbank.ru/rest';
-  const appName = env.VITE_TINVEST_APP_NAME || 'T-Start';
+  const token = env.TINVEST_TOKEN;
+  const base = env.TINVEST_SANDBOX_URL || 'https://sandbox-invest-public-api.tbank.ru/rest';
+  const appName = env.TINVEST_APP_NAME || 'T-Start';
   const contract = 'tinkoff.public.invest.api.contract.v1';
 
   if (!token || token.startsWith('your-')) {
-    skip('Токен не задан', 'задай VITE_TINVEST_TOKEN (токен песочницы)');
+    skip('Токен не задан', 'задай TINVEST_TOKEN (токен песочницы)');
     return;
   }
 

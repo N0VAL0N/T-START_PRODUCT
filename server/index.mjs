@@ -1,15 +1,17 @@
 // ===== Бэкенд T-Start =====
 // Зачем нужен:
 //  1) Токены (DeepSeek AI, T-Invest) не светятся во фронте.
-//  2) Песочница T-Invest проксируется с сервера — нет CORS, можно управлять TLS.
+//  2) Песочница T-Invest проксируется с сервера — нет CORS.
 //  3) MCP-эндпоинт «инструменты песочницы» + отложенные заявки.
 //
 // Запуск: node server/index.mjs  (или npm run server; Vite проксирует /api -> :8787)
-// Переменные берём из .env в корне проекта.
+// Переменные берём из окружения (.env в корне — только для локальной разработки).
 //
-// ВАЖНО про TLS: в твоей сети корпоративный прокси подменяет сертификат
-// (SELF_SIGNED_CERT_IN_CHAIN). Для DEV можно выставить TSTART_INSECURE_TLS=1,
-// чтобы отключить проверку (ТОЛЬКО локально, не в проде!).
+// БЕЗОПАСНОСТЬ TLS: проверка сертификатов ВСЕГДА включена (rejectUnauthorized: true).
+// Никаких NODE_TLS_REJECT_UNAUTHORIZED=0 / глобального отключения проверки.
+// Если локальный корпоративный прокси подменяет сертификат — задайте корневой CA
+// через стандартную переменную окружения NODE_EXTRA_CA_CERTS=/путь/к/ca.pem
+// (проверка при этом НЕ отключается, просто доверяем своему CA). Только для dev.
 
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
@@ -20,9 +22,11 @@ import https from 'node:https';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 
-// ---------- .env ----------
+// ---------- .env (загружается ТОЛЬКО при локальном запуске; в prod — process.env) ----------
 function loadEnv() {
   const env = {};
+  // В проде (Vercel) читаем только реальные переменные окружения, файлы .env игнорируем.
+  if (process.env.VERCEL) return { ...process.env };
   for (const name of ['.env', '.env.local']) {
     try {
       const txt = readFileSync(join(root, name), 'utf8');
@@ -37,27 +41,25 @@ function loadEnv() {
 }
 const ENV = loadEnv();
 
-const PORT = Number(ENV.TSTART_PORT || 8787);
+// Порт только для локального сервера (в prod задаётся платформой). Не часть API-конфига.
+const PORT = Number(process.env.TSTART_PORT || 8787);
 
 // ---------- AI: DeepSeek (OpenAI-совместимый API) ----------
-// Ключ начинается на "sk-". Никакого folder-id не нужно.
-// Документация: https://api-docs.deepseek.com/  (base_url: https://api.deepseek.com)
-const AI_URL = ENV.VITE_DEEPSEEK_API_URL || ENV.DEEPSEEK_API_URL || 'https://api.deepseek.com';
-const AI_KEY = ENV.VITE_DEEPSEEK_API_KEY || ENV.DEEPSEEK_API_KEY || ENV.VITE_YANDEX_AI_KEY;
-const MODEL = ENV.VITE_DEEPSEEK_MODEL || ENV.DEEPSEEK_MODEL || 'deepseek-flash';
+const AI_URL = ENV.DEEPSEEK_API_URL || 'https://api.deepseek.com';
+const AI_KEY = ENV.DEEPSEEK_API_KEY;
+const MODEL = ENV.DEEPSEEK_MODEL || 'deepseek-chat';
 
-const INVEST_URL = ENV.VITE_TINVEST_SANDBOX_URL || 'https://sandbox-invest-public-api.tbank.ru/rest';
-const INVEST_TOKEN = ENV.VITE_TINVEST_TOKEN;
-const APP_NAME = ENV.VITE_TINVEST_APP_NAME || 'T-Start';
-const INSECURE_TLS = ENV.TSTART_INSECURE_TLS === '1';
+const INVEST_URL = ENV.TINVEST_SANDBOX_URL || 'https://sandbox-invest-public-api.tbank.ru/rest';
+const INVEST_TOKEN = ENV.TINVEST_TOKEN;
+const APP_NAME = ENV.TINVEST_APP_NAME || 'T-Start';
 const CONTRACT = 'tinkoff.public.invest.api.contract.v1';
-// Готовый sandbox-счёт (если задан в .env — переиспользуем, не создаём новый).
-const ENV_SANDBOX_ACCOUNT_ID = (ENV.VITE_TINVEST_SANDBOX_ACCOUNT_ID || '').trim();
+// Готовый sandbox-счёт (если задан — переиспользуем, не создаём новый).
+const ENV_SANDBOX_ACCOUNT_ID = (ENV.TINVEST_SANDBOX_ACCOUNT_ID || '').trim();
 
-// Если включён insecure TLS — глушим проверку только для исходящих запросов из этого процесса.
-if (INSECURE_TLS) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+// ---------- HTTPS helper (проверка сертификата ВСЕГДА включена) ----------
+// Таймаут: у Vercel (Hobby) лимит ~10с на функцию — держим запас.
+const HTTP_TIMEOUT_MS = 8500;
 
-// ---------- HTTPS helper (управляемый TLS) ----------
 function httpsJson(url, { method = 'GET', headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
@@ -72,7 +74,8 @@ function httpsJson(url, { method = 'GET', headers = {}, body } = {}) {
           ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
           ...headers,
         },
-        rejectUnauthorized: !INSECURE_TLS,
+        // ВСЕГДА проверяем сертификат. Отключение проверки — запрещено.
+        rejectUnauthorized: true,
       },
       (res) => {
         let data = '';
@@ -81,10 +84,12 @@ function httpsJson(url, { method = 'GET', headers = {}, body } = {}) {
           let json;
           try { json = data ? JSON.parse(data) : {}; } catch { json = { raw: data }; }
           if (res.statusCode >= 200 && res.statusCode < 300) resolve(json);
-          else reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 300)}`));
+          else reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
         });
       }
     );
+    // Жёсткий таймаут, чтобы не упираться в лимит платформы.
+    req.setTimeout(HTTP_TIMEOUT_MS, () => req.destroy(new Error('TIMEOUT')));
     req.on('error', reject);
     if (payload) req.write(payload);
     req.end();
@@ -106,9 +111,49 @@ const toQ = (value) => ({
 });
 const fromQ = (q) => (q ? Number(q.units || 0) + Number(q.nano || 0) / 1e9 : 0);
 
-// Флаги готовности интеграций (по наличию ключей в .env).
+// Флаги готовности интеграций (по наличию ключей в env).
 const AI_READY = Boolean(AI_KEY && AI_KEY.startsWith('sk-') && !AI_KEY.startsWith('your-'));
 const INVEST_READY = Boolean(INVEST_TOKEN && !INVEST_TOKEN.startsWith('your-'));
+
+// ---------- Валидация входных данных (защита от инъекций/мусора) ----------
+// Тикер — ТОЛЬКО из фиксированного allow-list (никаких произвольных строк к брокеру).
+const ALLOWED_TICKERS = new Set(['SBER', 'GAZP', 'LKOH', 'YNDX', 'GMKN', 'TATN', 'MTSS', 'PLZL']);
+
+/**
+ * Строгая валидация тикера. Принимает только латиницу A-Z, 1..10 символов,
+ * и (опционально) сверяет с allow-list песочницы.
+ */
+function sanitizeTicker(value, { allowList = false } = {}) {
+  const t = String(value ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{1,10}$/.test(t)) throw new Error('BAD_TICKER');
+  if (allowList && !ALLOWED_TICKERS.has(t)) throw new Error('TICKER_NOT_ALLOWED');
+  return t;
+}
+
+/** Лоты: целое 1..10000. */
+function sanitizeLots(value) {
+  const n = Number(value ?? 1);
+  if (!Number.isInteger(n) || n < 1 || n > 10000) throw new Error('BAD_LOTS');
+  return n;
+}
+
+/** Направление: строго BUY/SELL. */
+function sanitizeDirection(value) {
+  const d = String(value ?? 'BUY').toUpperCase();
+  if (d !== 'BUY' && d !== 'SELL') throw new Error('BAD_DIRECTION');
+  return d;
+}
+
+/** История чата: массив {role,messages}, ограниченный по размеру и длине. */
+function sanitizeHistory(history) {
+  if (!Array.isArray(history)) return [];
+  const MAX_MSGS = 30;
+  const MAX_LEN = 4000;
+  return history
+    .slice(-MAX_MSGS)
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant' || m.role === 'system'))
+    .map((m) => ({ role: m.role, content: String(m.content ?? '').slice(0, MAX_LEN) }));
+}
 
 // ---------- HTTP helper для внешних JSON-api (AI) ----------
 function httpJson(url, { method = 'GET', headers = {}, body } = {}) {
@@ -117,10 +162,11 @@ function httpJson(url, { method = 'GET', headers = {}, body } = {}) {
     method,
     headers: { ...(payload ? { 'Content-Type': 'application/json' } : {}), ...headers },
     body: payload,
+    signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
   }).then(async (res) => {
     const text = await res.text();
     const json = text ? JSON.parse(text) : {};
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 300)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
     return json;
   });
 }
@@ -515,18 +561,6 @@ function splitTradeMarker(raw) {
   return { text, trade };
 }
 
-function extractJson(text) {
-  if (!text) return null;
-  let t = String(text).trim();
-  if (t.startsWith('"') && t.endsWith('"')) {
-    try { t = JSON.parse(t); } catch { /* оставляем как есть */ }
-  }
-  const start = t.indexOf('{');
-  const end = t.lastIndexOf('}');
-  if (start === -1 || end === -1 || end < start) return null;
-  try { return JSON.parse(t.slice(start, end + 1)); } catch { return null; }
-}
-
 /**
  * Резервный детерминированный разбор интента покупки/продажи из текста пользователя.
  */
@@ -588,9 +622,18 @@ async function handleChat({ history = [], userContext = {} }) {
     };
   }
 
-  const ticker = String(intent.ticker).toUpperCase();
-  const lots = Math.max(1, Number(intent.lots || 1));
-  const action = intent.action === 'sell' ? 'sell' : 'buy';
+  // Тикер из ответа модели — не доверяем напрямую: валидируем по allow-list.
+  let ticker, lots, action;
+  try {
+    ticker = sanitizeTicker(intent.ticker, { allowList: true });
+    lots = sanitizeLots(intent.lots ?? 1);
+    action = intent.action === 'sell' ? 'sell' : 'buy';
+  } catch {
+    return {
+      text: 'Хм, не уверен, о какой бумаге речь. Доступны: SBER, GAZP, LKOH, YNDX, GMKN, TATN, MTSS, PLZL. Уточнишь?',
+      pending: null,
+    };
+  }
 
   let quote;
   try {
@@ -646,8 +689,17 @@ function readBody(req) {
 }
 
 async function handleQuotes(url, res) {
-  const tickers = (url.searchParams.get('tickers') || MARKET_TICKERS.join(','))
+  const raw = (url.searchParams.get('tickers') || MARKET_TICKERS.join(','))
     .split(',').map((t) => t.trim()).filter(Boolean);
+  // Валидируем и дедуплицируем: только латиница, не более 12 тикеров за запрос.
+  const tickers = [];
+  for (const t of raw) {
+    try {
+      const clean = sanitizeTicker(t);
+      if (!tickers.includes(clean)) tickers.push(clean);
+    } catch { /* пропускаем невалидный тикер */ }
+    if (tickers.length >= 12) break;
+  }
   const quotes = [];
   for (const t of tickers) {
     try { quotes.push(await getQuote(t)); }
@@ -664,11 +716,9 @@ export async function handler(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, {});
 
   try {
+    // Health без утечек: только флаги готовности интеграций (без токенов/счёта).
     if (path === '/api/health') {
-      return send(res, 200, {
-        ok: true, ai: AI_READY, invest: INVEST_READY, insecureTls: INSECURE_TLS,
-        accountId: activeAccountId || ENV_SANDBOX_ACCOUNT_ID || null,
-      });
+      return send(res, 200, { ok: true, ai: AI_READY, invest: INVEST_READY });
     }
 
     // Переиспользуемый счёт песочницы (без создания новых при каждом вызове).
@@ -689,7 +739,7 @@ export async function handler(req, res) {
 
     if (path === '/api/ai/chat' && req.method === 'POST') {
       const body = await readBody(req);
-      const result = await handleChat(body);
+      const result = await handleChat({ ...body, history: sanitizeHistory(body?.history) });
       return send(res, 200, result);
     }
 
@@ -711,7 +761,17 @@ export async function handler(req, res) {
     }
 
     if (path === '/api/invest/order' && req.method === 'POST') {
-      const { accountId, ticker, lots = 1, direction = 'BUY', confirm = true } = await readBody(req);
+      const body = await readBody(req);
+      // Строгая валидация ДО любого обращения к брокеру.
+      let ticker, lots, direction;
+      try {
+        ticker = sanitizeTicker(body.ticker, { allowList: true });
+        lots = sanitizeLots(body.lots);
+        direction = sanitizeDirection(body.direction);
+      } catch (e) {
+        return send(res, 400, { executed: false, error: e.message });
+      }
+      const { accountId, confirm = true } = body;
 
       if (!confirm) {
         const order = await prepareOrder({ ticker, lots, direction });
@@ -779,8 +839,8 @@ if (isDirectRun) {
     console.log(`T-Start backend on http://localhost:${PORT}`);
     console.log(`  AI ready:     ${AI_READY} (DeepSeek, model=${MODEL})`);
     console.log(`  Invest ready: ${INVEST_READY}`);
-    if (!AI_READY) console.log('  [!] Нет ключа DeepSeek (VITE_DEEPSEEK_API_KEY=sk-...) — AI-чат вернёт заглушку');
-    if (INSECURE_TLS) console.log('  [!] TLS verification disabled (TSTART_INSECURE_TLS=1) — dev only');
+    if (!AI_READY) console.log('  [!] Нет ключа DeepSeek (DEEPSEEK_API_KEY=sk-...) — AI-чат вернёт заглушку');
+    if (!INVEST_READY) console.log('  [!] Нет токена T-Invest (TINVEST_TOKEN=...) — цены будут «н/д»');
   });
 }
 
