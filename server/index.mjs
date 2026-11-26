@@ -12,9 +12,9 @@
 // В проде эту переменную НЕ задавать — там проверка остаётся включённой.
 
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, extname } from 'node:path';
 import https from 'node:https';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -39,8 +39,8 @@ function loadEnv() {
 }
 const ENV = loadEnv();
 
-// Порт только для локального сервера (в prod задаётся платформой). Не часть API-конфига.
-const PORT = Number(process.env.TSTART_PORT || 8787);
+// Порт: приоритет — PORT (платформы: Amvera/Render), затем TSTART_PORT, затем 8787.
+const PORT = Number(process.env.PORT || process.env.TSTART_PORT || 8787);
 
 // ---------- AI: DeepSeek (OpenAI-совместимый API) ----------
 const AI_URL = ENV.DEEPSEEK_API_URL || 'https://api.deepseek.com';
@@ -779,6 +779,46 @@ async function handleQuotes(url, res) {
   return send(res, 200, { quotes });
 }
 
+// ---------- Раздача статики (прод: собранный фронт из dist/) ----------
+// Один сервис: отдаём и API, и SPA. В dev статику раздаёт Vite, сюда не доходит.
+const DIST_DIR = join(root, 'dist');
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+};
+
+function serveStatic(path, res) {
+  // Защита от выхода за пределы dist/ (path traversal).
+  let rel = decodeURIComponent(path).replace(/^\/+/, '');
+  if (rel.includes('..')) { send(res, 400, { error: 'BAD_PATH' }); return true; }
+  let file = join(DIST_DIR, rel);
+  try {
+    if (!rel || !existsSync(file) || statSync(file).isDirectory()) {
+      file = join(DIST_DIR, 'index.html'); // SPA fallback (client-side routing)
+    }
+    if (!existsSync(file)) return false; // фронт не собран — пусть ответит 404
+    const ext = extname(file).toLowerCase();
+    const body = readFileSync(file);
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    res.end(body);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ---------- HTTP приложение (переиспользуется локальным сервером и Vercel-функцией) ----------
 export async function handler(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
@@ -927,6 +967,11 @@ export async function handler(req, res) {
 
     if (path === '/api/mcp' && req.method === 'POST') {
       return send(res, 501, { error: 'MCP_NOT_CONFIGURED', note: 'Реальный счёт (MCP) будет добавлен отдельным этапом.' });
+    }
+
+    // Всё, что не /api — отдаём как статику (SSR-нет, SPA-да). Один сервис: фронт+API.
+    if (!path.startsWith('/api/') && serveStatic(path, res)) {
+      return;
     }
 
     return send(res, 404, { error: 'NOT_FOUND', path });

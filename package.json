@@ -9,6 +9,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "server": "node server/index.mjs",
+    "start": "node server/index.mjs",
     "dev:full": "node scripts/dev-all.mjs",
     "test:integrations": "node scripts/check-integrations.mjs",
     "preview": "vite preview"
@@ -36,3 +37,4 @@
     "vite": "^8.3.6"
   }
 }
+
