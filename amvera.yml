@@ -1,0 +1,19 @@
+meta:
+  environment: node
+  toolchain:
+    name: npm
+    version: "20"
+build:
+  # Собираем фронт (vite build -> dist/) и ставим зависимости.
+  additionalCommands: "npm ci && npm run build"
+  skip: false
+run:
+  # ОДИН сервис: Node-сервер отдаёт и API, и собранный фронт (dist/).
+  scriptName: server/index.mjs
+  command: ""
+  nodeArguments: ""
+  scriptArguments: ""
+  # Порт должен СОВПАДАТЬ с тем, что слушает сервер (дефолт в коде = 8787).
+  containerPort: 8787
+  persistenceMount: /data
+

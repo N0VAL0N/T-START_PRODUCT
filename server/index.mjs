@@ -987,9 +987,11 @@ const isDirectRun =
 
 if (isDirectRun) {
   createServer(handler).listen(PORT, () => {
-    console.log(`T-Start backend on http://localhost:${PORT}`);
+    console.log(`T-Start backend on port ${PORT}`);
+    console.log(`  static dir:   ${DIST_DIR} (exists=${existsSync(DIST_DIR)})`);
     console.log(`  AI ready:     ${AI_READY} (DeepSeek, model=${MODEL})`);
     console.log(`  Invest ready: ${INVEST_READY}`);
+    console.log(`  insecure TLS: ${INSECURE_TLS} (должно быть false в проде)`);
     if (!AI_READY) console.log('  [!] Нет ключа DeepSeek (DEEPSEEK_API_KEY=sk-...) — AI-чат вернёт заглушку');
     if (!INVEST_READY) console.log('  [!] Нет токена T-Invest (TINVEST_TOKEN=...) — цены будут «н/д»');
   });
