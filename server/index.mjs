@@ -7,11 +7,9 @@
 // Запуск: node server/index.mjs  (или npm run server; Vite проксирует /api -> :8787)
 // Переменные берём из окружения (.env в корне — только для локальной разработки).
 //
-// БЕЗОПАСНОСТЬ TLS: проверка сертификатов ВСЕГДА включена (rejectUnauthorized: true).
-// Никаких NODE_TLS_REJECT_UNAUTHORIZED=0 / глобального отключения проверки.
-// Если локальный корпоративный прокси подменяет сертификат — задайте корневой CA
-// через стандартную переменную окружения NODE_EXTRA_CA_CERTS=/путь/к/ca.pem
-// (проверка при этом НЕ отключается, просто доверяем своему CA). Только для dev.
+// БЕЗОПАСНОСТЬ TLS: по умолчанию проверка сертификатов ВКЛЮЧЕНА (rejectUnauthorized: true).
+// Локальный костыль под антивирус/прокси (подмена сертификата): TSTART_INSECURE_TLS=1 в .env.
+// В проде эту переменную НЕ задавать — там проверка остаётся включённой.
 
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
@@ -56,6 +54,11 @@ const CONTRACT = 'tinkoff.public.invest.api.contract.v1';
 // Готовый sandbox-счёт (если задан — переиспользуем, не создаём новый).
 const ENV_SANDBOX_ACCOUNT_ID = (ENV.TINVEST_SANDBOX_ACCOUNT_ID || '').trim();
 
+// ЛОКАЛЬНЫЙ костыль под антивирус/прокси (Kaspersky и т.п.), который подменяет
+// сертификат TLS → SELF_SIGNED_CERT_IN_CHAIN. Включается ТОЛЬКО явно в .env
+// (TSTART_INSECURE_TLS=1). По умолчанию ВЫКЛЮЧЕН, в проде не задаётся.
+const INSECURE_TLS = ENV.TSTART_INSECURE_TLS === '1';
+
 // ---------- HTTPS helper (проверка сертификата ВСЕГДА включена) ----------
 // Таймаут: у Vercel (Hobby) лимит ~10с на функцию — держим запас.
 const HTTP_TIMEOUT_MS = 8500;
@@ -74,8 +77,9 @@ function httpsJson(url, { method = 'GET', headers = {}, body } = {}) {
           ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
           ...headers,
         },
-        // ВСЕГДА проверяем сертификат. Отключение проверки — запрещено.
-        rejectUnauthorized: true,
+        // Проверка сертификата включена, КРОМЕ случая, когда локально явно задан
+        // TSTART_INSECURE_TLS=1 (антивирус подменяет сертификат). В проде — всегда true.
+        rejectUnauthorized: !INSECURE_TLS,
       },
       (res) => {
         let data = '';
@@ -116,18 +120,26 @@ const AI_READY = Boolean(AI_KEY && AI_KEY.startsWith('sk-') && !AI_KEY.startsWit
 const INVEST_READY = Boolean(INVEST_TOKEN && !INVEST_TOKEN.startsWith('your-'));
 
 // ---------- Валидация входных данных (защита от инъекций/мусора) ----------
-// Тикер — ТОЛЬКО из фиксированного allow-list (никаких произвольных строк к брокеру).
-const ALLOWED_TICKERS = new Set(['SBER', 'GAZP', 'LKOH', 'YNDX', 'GMKN', 'TATN', 'MTSS', 'PLZL']);
-
 /**
- * Строгая валидация тикера. Принимает только латиницу A-Z, 1..10 символов,
- * и (опционально) сверяет с allow-list песочницы.
+ * Строгая валидация тикера: только латиница A-Z, 1..10 символов.
+ * Существование тикера у брокера проверяется отдельно (в списке Shares).
  */
-function sanitizeTicker(value, { allowList = false } = {}) {
+function sanitizeTicker(value) {
   const t = String(value ?? '').trim().toUpperCase();
   if (!/^[A-Z]{1,10}$/.test(t)) throw new Error('BAD_TICKER');
-  if (allowList && !ALLOWED_TICKERS.has(t)) throw new Error('TICKER_NOT_ALLOWED');
   return t;
+}
+
+/**
+ * Проверка, что тикер реально торгуется у брокера (по справочнику Shares),
+ * и получение его инструмента. Так произвольная строка не дойдёт до заявки.
+ */
+async function resolveTradeableShare(ticker) {
+  const clean = sanitizeTicker(ticker);
+  const all = await getAllShares();
+  const found = all.find((s) => s.ticker === clean);
+  if (!found) throw new Error('TICKER_NOT_ALLOWED');
+  return found;
 }
 
 /** Лоты: целое 1..10000. */
@@ -180,15 +192,64 @@ let orderSeq = 1;
 const nextOrderId = () => `PO-${String(orderSeq++).padStart(4, '0')}`;
 
 // ---------- Инструменты и котировки ----------
-// Справочник тикеров для Market. Цены/имена берём строго из API.
-const MARKET_TICKERS = ['SBER', 'GAZP', 'LKOH', 'YNDX', 'GMKN', 'TATN', 'MTSS', 'PLZL'];
+// Цены/имена берём строго из API. Список акций — из песочницы (InstrumentsService/Shares).
 const sharesCache = new Map(); // ticker -> { ticker, uid, figi, lot, name, classCode }
 const quotesCache = new Map(); // ticker -> { at, data }
+
+// Кэш полного списка акций песочницы (обновляем не чаще раза в 6 часов).
+let allSharesCache = { at: 0, list: [] };
+
+/**
+ * Полный справочник акций из песочницы (InstrumentsService/Shares).
+ * Только торгуемые, по одной записи на тикер (берём classCode TQBR в приоритете).
+ * Без моков: что вернул API — то и отдаём.
+ */
+async function getAllShares() {
+  if (allSharesCache.list.length && Date.now() - allSharesCache.at < 6 * 60 * 60 * 1000) {
+    return allSharesCache.list;
+  }
+  const data = await investCall('InstrumentsService/Shares', {
+    instrumentStatus: 'INSTRUMENT_STATUS_BASE',
+  });
+  const raw = data?.instruments || [];
+  const byTicker = new Map();
+  for (const i of raw) {
+    if (!i.ticker) continue;
+    if (i.apiTradeAvailableFlag === false) continue;
+    const key = i.ticker.toUpperCase();
+    const item = {
+      ticker: key,
+      name: i.name || key,
+      uid: i.uid,
+      figi: i.figi,
+      lot: Number(i.lot || 1),
+      classCode: i.classCode || null,
+      currency: i.currency || 'rub',
+    };
+    // предпочитаем основной режим TQBR, если по тикеру несколько классов
+    const prev = byTicker.get(key);
+    if (!prev || (item.classCode === 'TQBR' && prev.classCode !== 'TQBR')) {
+      byTicker.set(key, item);
+    }
+  }
+  const list = [...byTicker.values()].sort((a, b) => a.ticker.localeCompare(b.ticker));
+  allSharesCache = { at: Date.now(), list };
+  return list;
+}
 
 /** Найти инструмент (Share) по тикеру. Кэшируем. */
 async function getShare(ticker) {
   const key = ticker.toUpperCase();
   if (sharesCache.has(key)) return sharesCache.get(key);
+
+  // 1) ищем в общем справочнике (без отдельного запроса на каждый тикер)
+  try {
+    const all = await getAllShares();
+    const found = all.find((s) => s.ticker === key);
+    if (found) { sharesCache.set(key, found); return found; }
+  } catch { /* справочник недоступен — пробуем прямой запрос */ }
+
+  // 2) запасной вариант — прямой ShareBy (на случай, если справочник не отдал тикер)
   const data = await investCall('InstrumentsService/ShareBy', {
     idType: 'INSTRUMENT_ID_TYPE_TICKER',
     classCode: 'TQBR',
@@ -415,7 +476,8 @@ async function getPortfolio(accountId) {
  * Валидирует инструмент, считает примерную стоимость лота.
  */
 async function prepareOrder({ ticker, lots = 1, direction = 'BUY' }) {
-  const share = await getShare(ticker);
+  // Резолвим инструмент ТОЛЬКО из торгуемого справочника брокера.
+  const share = await resolveTradeableShare(ticker);
   const price = await getLastPrice(share.uid || share.figi);
   const quantity = share.lot * Number(lots || 1);
   const id = nextOrderId();
@@ -622,17 +684,18 @@ async function handleChat({ history = [], userContext = {} }) {
     };
   }
 
-  // Тикер из ответа модели — не доверяем напрямую: валидируем по allow-list.
+  // Тикер из ответа модели — не доверяем напрямую: валидируем формат и наличие у брокера.
   let ticker, lots, action;
   try {
-    ticker = sanitizeTicker(intent.ticker, { allowList: true });
+    ticker = await resolveTradeableShare(intent.ticker);
+    ticker = ticker.ticker;
     lots = sanitizeLots(intent.lots ?? 1);
     action = intent.action === 'sell' ? 'sell' : 'buy';
-  } catch {
-    return {
-      text: 'Хм, не уверен, о какой бумаге речь. Доступны: SBER, GAZP, LKOH, YNDX, GMKN, TATN, MTSS, PLZL. Уточнишь?',
-      pending: null,
-    };
+  } catch (e) {
+    if (e.message === 'TICKER_NOT_ALLOWED') {
+      return { text: `Такой бумаги (${String(intent.ticker).toUpperCase()}) нет в списке торгуемых. Уточни тикер?`, pending: null };
+    }
+    return { text: 'Хм, не уверен, о какой бумаге речь. Уточни тикер?', pending: null };
   }
 
   let quote;
@@ -689,16 +752,24 @@ function readBody(req) {
 }
 
 async function handleQuotes(url, res) {
-  const raw = (url.searchParams.get('tickers') || MARKET_TICKERS.join(','))
-    .split(',').map((t) => t.trim()).filter(Boolean);
-  // Валидируем и дедуплицируем: только латиница, не более 12 тикеров за запрос.
-  const tickers = [];
-  for (const t of raw) {
-    try {
-      const clean = sanitizeTicker(t);
-      if (!tickers.includes(clean)) tickers.push(clean);
-    } catch { /* пропускаем невалидный тикер */ }
-    if (tickers.length >= 12) break;
+  let tickers;
+  const param = url.searchParams.get('tickers');
+  if (param) {
+    // Явно запрошенные тикеры: валидируем формат (латиница), ≤24 за запрос.
+    const raw = param.split(',').map((t) => t.trim()).filter(Boolean);
+    tickers = [];
+    for (const t of raw) {
+      try {
+        const clean = sanitizeTicker(t);
+        if (!tickers.includes(clean)) tickers.push(clean);
+      } catch { /* пропускаем невалидный тикер */ }
+      if (tickers.length >= 24) break;
+    }
+  } else {
+    // Без параметра — берём реальный список акций песочницы (без моков).
+    const all = await getAllShares();
+    // Ограничиваем одним батчем, чтобы не превысить таймаут функции.
+    tickers = all.slice(0, 24).map((s) => s.ticker);
   }
   const quotes = [];
   for (const t of tickers) {
@@ -737,6 +808,40 @@ export async function handler(req, res) {
       return await handleQuotes(url, res);
     }
 
+    // Полный список акций песочницы (справочник, без цен) — для каталога на фронте.
+    if (path === '/api/shares') {
+      const all = await getAllShares();
+      return send(res, 200, {
+        count: all.length,
+        shares: all.map((s) => ({ ticker: s.ticker, name: s.name, lot: s.lot, classCode: s.classCode })),
+      });
+    }
+
+    // ДИАГНОСТИКА (безопасно: токен НЕ выводим). Показывает шаги запроса к T-Invest.
+    if (path === '/api/debug/invest') {
+      const out = { investReady: INVEST_READY, investUrl: INVEST_URL, steps: [] };
+      const step = async (name, fn) => {
+        const t0 = Date.now();
+        try {
+          const v = await fn();
+          out.steps.push({ name, ok: true, ms: Date.now() - t0, value: v });
+          return v;
+        } catch (e) {
+          out.steps.push({ name, ok: false, ms: Date.now() - t0, code: e.code || null, error: e.message });
+          throw e;
+        }
+      };
+      try {
+        const share = await step('ShareBy(SBER)', () => getShare('SBER'));
+        const id = share.uid || share.figi;
+        await step('GetLastPrices', () => getLastPrice(id));
+        out.ok = true;
+      } catch {
+        out.ok = false;
+      }
+      return send(res, 200, out);
+    }
+
     if (path === '/api/ai/chat' && req.method === 'POST') {
       const body = await readBody(req);
       const result = await handleChat({ ...body, history: sanitizeHistory(body?.history) });
@@ -765,7 +870,8 @@ export async function handler(req, res) {
       // Строгая валидация ДО любого обращения к брокеру.
       let ticker, lots, direction;
       try {
-        ticker = sanitizeTicker(body.ticker, { allowList: true });
+        // Валидация формата; реальное существование проверит prepareOrder (по справочнику).
+        ticker = sanitizeTicker(body.ticker);
         lots = sanitizeLots(body.lots);
         direction = sanitizeDirection(body.direction);
       } catch (e) {

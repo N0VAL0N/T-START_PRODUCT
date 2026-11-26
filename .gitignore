@@ -27,3 +27,12 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+
+# Local trusted CA certificates (corporate proxy / antivirus / local CA).
+# НИКОГДА не коммить приватные/корпоративные сертификаты.
+# Публичный CA (напр. Russian Trusted Root / Минцифры), нужный и на Vercel,
+# назови файлом *.public.pem — он будет добавлен.
+certs/*
+!certs/*.public.pem
+!certs/README.md
+

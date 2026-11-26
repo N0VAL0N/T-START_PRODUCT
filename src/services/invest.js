@@ -39,6 +39,7 @@ export async function tradeByTicker(accountId, { ticker, lots = 1, direction = '
  * Реальные котировки с бэкенда (/api/quotes). Цены/риск — из T-Invest API.
  * Возвращает массив: [{ ticker, name, price, priceExact, change, lot, riskLevel, volatility, maxDrawdown, riskNote }]
  * Если по тикеру нет данных — поля null (без выдуманных значений).
+ * Если tickers не переданы — бэкенд отдаёт реальный список акций песочницы (без моков).
  */
 export async function fetchQuotes(tickers) {
   const qs = Array.isArray(tickers) && tickers.length
@@ -48,4 +49,15 @@ export async function fetchQuotes(tickers) {
   if (!res.ok) throw new Error(`QUOTES_ERROR_${res.status}`);
   const data = await res.json();
   return data.quotes || [];
+}
+
+/**
+ * Справочник всех торгуемых акций песочницы (/api/shares) — без цен.
+ * Возвращает [{ ticker, name, lot, classCode }].
+ */
+export async function fetchShares() {
+  const res = await fetch(`${API}/shares`);
+  if (!res.ok) throw new Error(`SHARES_ERROR_${res.status}`);
+  const data = await res.json();
+  return data.shares || [];
 }

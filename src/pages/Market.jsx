@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search, Bot, ChevronRight, AlertTriangle, Loader2, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
-import { useQuotes } from '../hooks/useQuotes';
+import { fetchQuotes } from '../services/invest';
 import { fmtPrice, fmtChange } from '../utils/format';
 
-// Список тикеров для экрана Рынок. Цены/риск — только из /api/quotes.
-const TICKERS = ['SBER', 'GAZP', 'LKOH', 'YNDX', 'GMKN', 'TATN', 'MTSS', 'PLZL'];
+// Рынок берёт реальный список акций песочницы из /api/quotes (без параметров).
+// Без моков: что вернул брокер — то и показываем. Локальный поиск по списку.
+const REFRESH_MS = 60_000;
 
 // Риск → аккуратный бейдж с точкой-индикатором (обе темы).
 const RISK_STYLE = {
@@ -98,14 +99,31 @@ function SkeletonCard() {
 
 export default function Market({ onOpenChat, trackEvent }) {
   const filters = ['Все', 'Безопасные', 'Мои активы'];
-  const { byTicker, loading } = useQuotes(TICKERS);
   const [activeFilter, setActiveFilter] = useState('Все');
   const [query, setQuery] = useState('');
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const rows = useMemo(
-    () => TICKERS.map((t) => byTicker[t] || { ticker: t, name: t, price: null, change: null, riskLevel: null }),
-    [byTicker]
-  );
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const arr = await fetchQuotes(); // весь реальный список акций песочницы
+        if (!cancelled) { setRows(arr); setError(null); }
+      } catch (e) {
+        if (!cancelled) setError(e.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    const id = setInterval(load, REFRESH_MS);
+    const onVisibility = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { cancelled = true; clearInterval(id); document.removeEventListener('visibilitychange', onVisibility); };
+  }, []);
 
   // Фильтрация: по категории + локальный поиск по тикеру/имени (без доп. запросов).
   const visible = useMemo(() => {
@@ -118,7 +136,7 @@ export default function Market({ onOpenChat, trackEvent }) {
     });
   }, [rows, activeFilter, query]);
 
-  const firstLoad = loading && rows.every((r) => r.price == null);
+  const firstLoad = loading && rows.length === 0;
 
   return (
     <div className="max-w-6xl mx-auto w-full">
@@ -177,13 +195,19 @@ export default function Market({ onOpenChat, trackEvent }) {
       {/* Сетка карточек */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
         {firstLoad
-          ? TICKERS.map((t) => <SkeletonCard key={t} />)
+          ? Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)
           : visible.map((stock, i) => (
               <MarketCard key={stock.ticker} stock={stock} index={i} onOpen={() => trackEvent(`Клик по ${stock.ticker}`)} />
             ))}
       </div>
 
-      {!firstLoad && visible.length === 0 && (
+      {!firstLoad && error && rows.length === 0 && (
+        <div className="text-center py-16 text-gray-500 dark:text-gray-400 text-sm">
+          Не удалось загрузить котировки. Попробуй обновить чуть позже.
+        </div>
+      )}
+
+      {!firstLoad && !error && visible.length === 0 && (
         <div className="text-center py-16 text-gray-500 dark:text-gray-400 text-sm">
           {activeFilter === 'Мои активы'
             ? 'Здесь появятся твои активы после первой покупки.'
