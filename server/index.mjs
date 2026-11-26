@@ -859,7 +859,28 @@ export async function handler(req, res) {
 
     // ДИАГНОСТИКА (безопасно: токен НЕ выводим). Показывает шаги запроса к T-Invest.
     if (path === '/api/debug/invest') {
-      const out = { investReady: INVEST_READY, investUrl: INVEST_URL, steps: [] };
+      const out = { investReady: INVEST_READY, investUrl: INVEST_URL, insecureTls: INSECURE_TLS, steps: [] };
+      // Кто подписал сертификат T-Invest (читаем БЕЗ проверки — только для диагностики,
+      // чтобы увидеть issuer при MITM-прокси). Никаких данных не меняет.
+      try {
+        const u = new URL(INVEST_URL);
+        const certInfo = await new Promise((resolve) => {
+          const r = https.request(
+            { hostname: u.hostname, port: 443, path: '/', method: 'GET', rejectUnauthorized: false },
+            (res) => {
+              const c = res.socket.getPeerCertificate();
+              res.destroy();
+              resolve({ issuer: c?.issuer || null, subject: c?.subject || null });
+            }
+          );
+          r.setTimeout(6000, () => r.destroy(new Error('CERT_TIMEOUT')));
+          r.on('error', (e) => resolve({ error: e.code || e.message }));
+          r.end();
+        });
+        out.cert = certInfo;
+      } catch (e) {
+        out.cert = { error: e.message };
+      }
       const step = async (name, fn) => {
         const t0 = Date.now();
         try {
