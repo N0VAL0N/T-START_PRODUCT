@@ -12,13 +12,48 @@
 // В проде эту переменную НЕ задавать — там проверка остаётся включённой.
 
 import { createServer } from 'node:http';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, extname } from 'node:path';
 import https from 'node:https';
+import tls from 'node:tls';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
+
+// ---------- Доверенные CA: Russian Trusted (Минцифры) из certs/ ----------
+// Т-Банк перевёл API на сертификаты НУЦ Минцифры (Russian Trusted Root/Sub CA),
+// которых нет в стандартном хранилище Node → SELF_SIGNED_CERT_IN_CHAIN на чистом
+// сервере (Amvera и т.п.). Добавляем эти ПУБЛИЧНЫЕ CA к доверенным.
+// Проверка TLS остаётся ВКЛЮЧЕННОЙ; мы лишь доверяем легитимному CA.
+// Также поддерживаем стандартный NODE_EXTRA_CA_CERTS и папку из EXTRA_CA_DIR.
+function loadCaFileToBuffers(file) {
+  try {
+    if (!existsSync(file)) return [];
+    return [readFileSync(file)];
+  } catch { return []; }
+}
+function loadExtraCAs() {
+  const out = [];
+  // 1) стандартная переменная (если задана и читается на старте)
+  if (process.env.NODE_EXTRA_CA_CERTS) out.push(...loadCaFileToBuffers(process.env.NODE_EXTRA_CA_CERTS));
+  // 2) папки: certs/ в корне и EXTRA_CA_DIR
+  const dirs = [join(root, 'certs'), ...(process.env.EXTRA_CA_DIR ? [process.env.EXTRA_CA_DIR] : [])];
+  for (const dir of dirs) {
+    try {
+      if (!existsSync(dir)) continue;
+      for (const name of readdirSync(dir)) {
+        if (!/\.(pem|cer|crt)$/i.test(name)) continue;
+        out.push(...loadCaFileToBuffers(join(dir, name)));
+      }
+    } catch { /* нет папки */ }
+  }
+  return out;
+}
+const EXTRA_CAS = loadExtraCAs();
+// Дополняем системные корни нашими (не заменяем!), только если что-то добавили.
+const SYSTEM_CAS = tls.rootCertificates.map((pem) => Buffer.from(pem));
+const TRUSTED_CA = EXTRA_CAS.length ? [...EXTRA_CAS, ...SYSTEM_CAS] : undefined;
 
 // ---------- .env (загружается ТОЛЬКО при локальном запуске; в prod — process.env) ----------
 function loadEnv() {
@@ -77,9 +112,11 @@ function httpsJson(url, { method = 'GET', headers = {}, body } = {}) {
           ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
           ...headers,
         },
-        // Проверка сертификата включена, КРОМЕ случая, когда локально явно задан
-        // TSTART_INSECURE_TLS=1 (антивирус подменяет сертификат). В проде — всегда true.
+        // Проверка сертификата включена, КРОМЕ случая, когда явно задан
+        // TSTART_INSECURE_TLS=1 (локальный антивирус/прокси). В проде — true.
         rejectUnauthorized: !INSECURE_TLS,
+        // Russian Trusted (Минцифры) и прочие CA из certs/ — в ДОПОЛНЕНИЕ к системным.
+        ...(TRUSTED_CA ? { ca: TRUSTED_CA } : {}),
       },
       (res) => {
         let data = '';
@@ -1013,6 +1050,7 @@ if (isDirectRun) {
     console.log(`  AI ready:     ${AI_READY} (DeepSeek, model=${MODEL})`);
     console.log(`  Invest ready: ${INVEST_READY}`);
     console.log(`  insecure TLS: ${INSECURE_TLS} (должно быть false в проде)`);
+    console.log(`  extra CAs:    ${EXTRA_CAS.length} (Минцифры/локальные из certs/)`);
     if (!AI_READY) console.log('  [!] Нет ключа DeepSeek (DEEPSEEK_API_KEY=sk-...) — AI-чат вернёт заглушку');
     if (!INVEST_READY) console.log('  [!] Нет токена T-Invest (TINVEST_TOKEN=...) — цены будут «н/д»');
   });
