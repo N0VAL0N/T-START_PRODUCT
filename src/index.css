@@ -60,6 +60,19 @@
   .dark .skeleton {
     background-image: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
   }
+
+  /* ============================================================
+     Единый контейнер страницы: центрирование по ширине + безопасные
+     отступы снизу, чтобы нижняя мобильная навигация НЕ перекрывала контент.
+     Применяй ко всем экранам: <div className="page-container">.
+     ============================================================ */
+  .page-container {
+    @apply w-full mx-auto pb-28 md:pb-10;
+  }
+  /* Типовые ограничения ширины (по контенту страницы). */
+  .page-container--narrow { @apply max-w-2xl; }
+  .page-container--default { @apply max-w-4xl; }
+  .page-container--wide { @apply max-w-6xl; }
 }
 
 @import "./styles/scrollbar.css";

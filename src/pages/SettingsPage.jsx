@@ -1,17 +1,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Lock, Newspaper, Trophy, LogOut, FlaskConical, Headphones, Activity, Coins, CreditCard, RotateCcw, ShieldCheck, AlertCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Lock, Newspaper, Trophy, LogOut, FlaskConical, Headphones, Activity, Coins, CreditCard, RotateCcw, ShieldCheck } from 'lucide-react';
 import SettingsModal from '../components/SettingsModal';
 import Toggle from '../components/Toggle';
+import CardForm from '../components/CardForm';
 import { useUserStore } from '../store/userStore';
-import { formatCardNumber, formatExpiry, luhnValid } from '../utils/format';
 
 export default function SettingsPage({ userData, onResetAccount }) {
   const navigate = useNavigate();
   const [modalType, setModalType] = useState(null);
-  // Режим карточной формы реального счёта.
-  const [cardForm, setCardForm] = useState({ number: '', expiry: '', cvv: '', holder: '' });
-  const [cardError, setCardError] = useState('');
 
   const setBalance = useUserStore((s) => s.setBalance);
   const resetStoreAccount = useUserStore((s) => s.resetAccount);
@@ -29,31 +26,11 @@ export default function SettingsPage({ userData, onResetAccount }) {
     resetStoreAccount();
   };
 
-  // ---- Реальный счёт: ввод карты ----
-  const activateRealAccount = () => {
-    setCardError('');
-    const digits = cardForm.number.replace(/\D/g, '');
-    if (!luhnValid(digits)) {
-      setCardError('Проверь номер карты — он введён неверно.');
-      return;
-    }
-    if (!/^\d{2}\/\d{2}$/.test(cardForm.expiry)) {
-      setCardError('Срок действия в формате ММ/ГГ.');
-      return;
-    }
-    if (!/^\d{3}$/.test(cardForm.cvv)) {
-      setCardError('CVV — 3 цифры.');
-      return;
-    }
-    if (cardForm.holder.trim().length < 2) {
-      setCardError('Укажи имя держателя карты.');
-      return;
-    }
-    // Переключаем режим на реальный; храним ТОЛЬКО маску (никогда не CVV/полный номер).
-    const mask = `•••• ${digits.slice(-4)}`;
+  // CardForm отдаёт (mask, raw) после собственной валидации — здесь только применяем режим.
+  const activateRealAccount = (_mask, raw) => {
+    const mask = `•••• ${raw.number.slice(-4)}`;
     setAccountMode('real', mask);
     setModalType(null);
-    setCardForm({ number: '', expiry: '', cvv: '', holder: '' });
   };
 
   const switchToSandbox = () => {
@@ -62,10 +39,10 @@ export default function SettingsPage({ userData, onResetAccount }) {
   };
 
   return (
-    <div className="max-w-2xl mx-auto w-full pb-10">
+    <div className="page-container page-container--narrow">
       <header className="flex items-center gap-4 mb-8">
         <button onClick={() => navigate(-1)} className="p-2 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-full transition-colors text-gray-900 dark:text-white">
-           <ChevronLeft size={24} />
+          <ChevronLeft size={24} />
         </button>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Настройки</h1>
       </header>
@@ -163,11 +140,11 @@ export default function SettingsPage({ userData, onResetAccount }) {
         </div>
 
         <button onClick={onResetAccount} className="w-full p-4 rounded-2xl bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 font-bold flex items-center gap-3 hover:bg-yellow-500/20 transition-colors">
-           <RotateCcw size={20} /> Сбросить аккаунт и пройти онбординг заново
+          <RotateCcw size={20} /> Сбросить аккаунт и пройти онбординг заново
         </button>
 
         <button onClick={handleLogout} className="w-full p-4 rounded-2xl bg-red-500/10 text-red-500 font-bold flex items-center gap-3 hover:bg-red-500/20 transition-colors">
-           <LogOut size={20} /> Выйти из аккаунта
+          <LogOut size={20} /> Выйти из аккаунта
         </button>
       </div>
 
@@ -188,68 +165,7 @@ export default function SettingsPage({ userData, onResetAccount }) {
               <p className="text-sm text-gray-500 mb-4">
                 Чтобы торговать реальными деньгами, привяжи банковскую карту. Данные карты проверяются и не хранятся на сервере — сохраняется только последние 4 цифры.
               </p>
-
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs font-bold text-gray-500 mb-1 block">Номер карты</label>
-                  <input
-                    inputMode="numeric"
-                    value={cardForm.number}
-                    onChange={(e) => setCardForm((f) => ({ ...f, number: formatCardNumber(e.target.value) }))}
-                    placeholder="0000 0000 0000 0000"
-                    className="w-full p-3 rounded-xl bg-gray-100 dark:bg-gray-800 outline-none text-gray-900 dark:text-white"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <label className="text-xs font-bold text-gray-500 mb-1 block">Срок</label>
-                    <input
-                      inputMode="numeric"
-                      value={cardForm.expiry}
-                      onChange={(e) => setCardForm((f) => ({ ...f, expiry: formatExpiry(e.target.value) }))}
-                      placeholder="ММ/ГГ"
-                      className="w-full p-3 rounded-xl bg-gray-100 dark:bg-gray-800 outline-none text-gray-900 dark:text-white"
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <label className="text-xs font-bold text-gray-500 mb-1 block">CVV</label>
-                    <input
-                      inputMode="numeric"
-                      type="password"
-                      value={cardForm.cvv}
-                      onChange={(e) => setCardForm((f) => ({ ...f, cvv: e.target.value.replace(/\D/g, '').slice(0, 3) }))}
-                      placeholder="•••"
-                      className="w-full p-3 rounded-xl bg-gray-100 dark:bg-gray-800 outline-none text-gray-900 dark:text-white"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-gray-500 mb-1 block">Имя держателя</label>
-                  <input
-                    value={cardForm.holder}
-                    onChange={(e) => setCardForm((f) => ({ ...f, holder: e.target.value }))}
-                    placeholder="IVAN IVANOV"
-                    className="w-full p-3 rounded-xl bg-gray-100 dark:bg-gray-800 outline-none text-gray-900 dark:text-white"
-                  />
-                </div>
-              </div>
-
-              {cardError && (
-                <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 text-red-500 text-sm mt-3">
-                  <AlertCircle size={18} className="shrink-0 mt-0.5" />
-                  <span>{cardError}</span>
-                </div>
-              )}
-
-              <button
-                onClick={activateRealAccount}
-                className="w-full bg-yellow-400 text-black font-bold py-3 rounded-xl hover:bg-yellow-500 transition-colors mt-4 flex items-center justify-center gap-2"
-              >
-                <CreditCard size={18} /> Подключить реальный счёт
-              </button>
-              <p className="text-center text-[10px] text-gray-400 mt-3">
-                Демонстрационный поток: реальное подключение к брокеру требует OAuth в проде.
-              </p>
+              <CardForm onSubmit={activateRealAccount} />
             </>
           )}
         </SettingsModal>

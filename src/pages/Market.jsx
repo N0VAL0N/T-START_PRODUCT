@@ -1,174 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+// Market — рендер каталога акций. Логика загрузки/фильтров — в hooks/useMarket.js.
+import { useState } from 'react';
 import { Search, AlertTriangle, Loader2, ArrowUpRight, ArrowDownRight, Minus, X, Filter } from 'lucide-react';
-import { fetchQuotes, fetchShares } from '../services/invest';
 import { fmtPrice, fmtChange } from '../utils/format';
 import Mascot from '../components/Mascot';
-
-const CHUNK = 6;          // Размер запроса к API
-const MAX_PARALLEL = 3;   // Параллельных запросов
-const INITIAL_LIMIT = 30; // Сколько карточек сразу показываем
-const LOAD_STEP = 10;     // Сколько карточек добавляем при скролле
-
-const RISK_STYLE = {
-  'Низкий': { dot: 'bg-green-500', text: 'text-green-600 dark:text-green-400', bg: 'bg-green-500/10' },
-  'Умеренный': { dot: 'bg-yellow-500', text: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-500/10' },
-  'Высокий': { dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400', bg: 'bg-red-500/10' },
-};
-
-function RiskBadge({ level }) {
-  const s = RISK_STYLE[level] || RISK_STYLE['Умеренный'];
-  return (
-    <span className={`inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full ${s.bg} ${s.text}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
-      {level || 'Риск н/д'}
-    </span>
-  );
-}
+import RiskPill from '../components/ui/RiskPill';
+import { useMarket } from '../hooks/useMarket';
 
 export default function Market({ onOpenChat, trackEvent, userData, activeOutfit }) {
-  const [activeFilter, setActiveFilter] = useState('all');
-  const [query, setQuery] = useState('');
-  
-  // Данные
-  const [allTickers, setAllTickers] = useState([]); // Справочник тикеров
-  const [pricesMap, setPricesMap] = useState({});   // Кэш цен по тикерам
-  const [visibleCount, setVisibleCount] = useState(INITIAL_LIMIT);
-  
-  // Состояния
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(null);
+  const {
+    activeFilter, setActiveFilter, query, setQuery,
+    allTickers, visibleCount, displayStocks,
+    loading, refreshing, busy, error,
+    observerTarget,
+  } = useMarket({ userData });
+
   const [isFilterOpen, setIsFilterOpen] = useState(false);
-  
-  const observerTarget = useRef(null);
-  const isLoadingRef = useRef(false);
-
-  // 2. Загрузка цен для отображения
-  const loadPrices = async (tickersToLoad) => {
-    if (isLoadingRef.current || !tickersToLoad.length) return;
-    isLoadingRef.current = true;
-    setRefreshing(true);
-
-    try {
-      // Разбиваем на чанки
-      const chunks = [];
-      for (let i = 0; i < tickersToLoad.length; i += CHUNK) {
-        chunks.push(tickersToLoad.slice(i, i + CHUNK));
-      }
-
-      for (let i = 0; i < chunks.length; i += MAX_PARALLEL) {
-        const group = chunks.slice(i, i + MAX_PARALLEL);
-        const results = await Promise.all(group.map(chunk => fetchQuotes(chunk)));
-        
-        // Собираем в мап
-        setPricesMap(prev => {
-          const newMap = { ...prev };
-          results.flat().forEach(q => {
-            newMap[q.ticker] = q;
-          });
-          return newMap;
-        });
-      }
-    } catch (e) {
-      console.error('Failed to load prices', e);
-    } finally {
-      isLoadingRef.current = false;
-      setRefreshing(false);
-    }
-  };
-
-  // 1. Загрузка справочника (без цен), затем сразу первых цен — одним потоком,
-  // чтобы не дёргать loadPrices из эффекта (без каскадных ре-рендеров).
-  useEffect(() => {
-    let isCancelled = false;
-    const loadShares = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const shares = await fetchShares();
-        if (isCancelled) return;
-        // Фильтруем мусор (только адекватные тикеры)
-        const validShares = shares.filter(s => s.ticker.length <= 5 && s.name.length > 2);
-        setAllTickers(validShares);
-        setLoading(false);
-        // Сразу подгружаем цены первых карточек.
-        loadPrices(validShares.slice(0, INITIAL_LIMIT).map(s => s.ticker));
-      } catch (e) {
-        if (!isCancelled) setError(e.message);
-        if (!isCancelled) setLoading(false);
-      }
-    };
-    loadShares();
-    return () => { isCancelled = true; };
-  }, []);
-
-  // 4. Ленивая подгрузка при скролле
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !isLoadingRef.current) {
-          // Увеличиваем количество видимых карточек
-          const nextVisible = visibleCount + LOAD_STEP;
-          setVisibleCount(nextVisible);
-          
-          // Берем следующие тикеры
-          const currentVisibleTickers = allTickers.slice(0, nextVisible);
-          // Отфильтровываем те, для которых уже есть цены
-          const missingTickers = currentVisibleTickers
-            .filter(s => !pricesMap[s.ticker])
-            .map(s => s.ticker);
-            
-          if (missingTickers.length > 0) {
-            loadPrices(missingTickers);
-          }
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    const target = observerTarget.current;
-    if (target) observer.observe(target);
-
-    return () => {
-      if (target) observer.unobserve(target);
-    };
-  }, [visibleCount, allTickers, pricesMap]);
-
-  // 5. Фильтрация и отрисовка
-  const displayStocks = useMemo(() => {
-    // 1. Берем тикеры по порядку из справочника
-    let list = allTickers.map(t => {
-      const priceData = pricesMap[t.ticker];
-      return {
-        ...t,
-        ...priceData, // Если есть данные — обогащаем
-        // Если данных нет — оставляем пустыми
-        price: priceData?.price ?? null,
-        change: priceData?.change ?? null,
-        riskLevel: priceData?.riskLevel || 'Умеренный',
-      };
-    });
-
-    // 2. Фильтры
-    if (activeFilter === 'safe') list = list.filter(s => s.riskLevel === 'Низкий');
-    if (activeFilter === 'growth') list = list.filter(s => s.change > 0);
-    if (activeFilter === 'closed') list = list.filter(s => s.price === null); // Закрытые
-    if (activeFilter === 'my') list = list.filter(s => userData?.portfolioStocks?.some(p => p.ticker === s.ticker));
-
-    // 3. Поиск
-    if (query.trim()) {
-      const q = query.toLowerCase();
-      list = list.filter(s => s.ticker.toLowerCase().includes(q) || (s.name || '').toLowerCase().includes(q));
-    }
-
-    // 4. Ограничиваем визуальный размер
-    return list.slice(0, visibleCount);
-  }, [allTickers, pricesMap, activeFilter, query, userData, visibleCount]);
-
-  const busy = loading || refreshing;
 
   return (
-    <div className="max-w-6xl mx-auto w-full pb-24">
+    <div className="page-container page-container--wide">
       {/* Хедер */}
       <header className="relative overflow-hidden rounded-3xl mb-6 p-6 md:p-8 bg-gradient-to-br from-yellow-500/10 via-transparent to-transparent border border-yellow-500/20">
         <div className="absolute -top-16 -right-16 w-56 h-56 rounded-full bg-yellow-400/10 blur-3xl pointer-events-none" />
@@ -204,7 +53,6 @@ export default function Market({ onOpenChat, trackEvent, userData, activeOutfit 
           <Search size={18} className="text-gray-400" />
           <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по тикеру или названию" className="bg-transparent outline-none w-full text-sm text-gray-900 dark:text-white placeholder-gray-500" />
         </div>
-        
         <button onClick={() => setIsFilterOpen(true)} className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white dark:bg-[#1a1a1a] border border-gray-100 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#222] transition-colors shrink-0">
           <Filter size={18} />
           <span className="hidden sm:inline text-sm font-medium">Фильтры</span>
@@ -216,10 +64,9 @@ export default function Market({ onOpenChat, trackEvent, userData, activeOutfit 
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#1e1e1e] border border-gray-200 dark:border-gray-800 w-full max-w-sm rounded-3xl p-6 shadow-2xl relative">
             <div className="flex justify-between items-center mb-6">
-               <h2 className="text-xl font-bold text-gray-900 dark:text-white">Фильтры</h2>
-               <button onClick={() => setIsFilterOpen(false)} className="p-2 text-gray-400 hover:text-gray-900 dark:hover:text-white bg-gray-100 dark:bg-gray-800 rounded-full transition-colors"><X size={20}/></button>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Фильтры</h2>
+              <button onClick={() => setIsFilterOpen(false)} className="p-2 text-gray-400 hover:text-gray-900 dark:hover:text-white bg-gray-100 dark:bg-gray-800 rounded-full transition-colors"><X size={20} /></button>
             </div>
-            
             <div className="flex flex-col gap-2 mb-6">
               {[
                 { id: 'all', label: 'Все' },
@@ -245,7 +92,7 @@ export default function Market({ onOpenChat, trackEvent, userData, activeOutfit 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
         {loading && allTickers.length === 0 ? (
           Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="p-4 rounded-2xl bg-white dark:bg-[#1a1a1a] border border-gray-100 dark:border-gray-800 h-24 animate-pulse" />
+            <div key={i} className="p-4 rounded-2xl bg-white dark:bg-[#1a1a1a] border border-gray-100 dark:border-gray-800 h-24 skeleton" />
           ))
         ) : (
           displayStocks.map((stock) => (
@@ -265,7 +112,7 @@ export default function Market({ onOpenChat, trackEvent, userData, activeOutfit 
                       <span className="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400 truncate">{stock.name}</span>
                     </p>
                     <div className="mt-1">
-                      {stock.price != null ? <RiskBadge level={stock.riskLevel} /> : <span className="text-[10px] text-gray-400">Нет данных</span>}
+                      {stock.price != null ? <RiskPill level={stock.riskLevel} variant="dot" /> : <span className="text-[10px] text-gray-400">Нет данных</span>}
                     </div>
                   </div>
                 </div>
@@ -277,11 +124,11 @@ export default function Market({ onOpenChat, trackEvent, userData, activeOutfit 
                   <div className={`mt-1 inline-flex items-center gap-0.5 text-xs font-semibold px-1.5 py-0.5 rounded-md ${
                     stock.change == null ? 'text-gray-400'
                       : stock.change >= 0 ? 'text-green-600 dark:text-green-400 bg-green-500/10'
-                      : 'text-red-600 dark:text-red-400 bg-red-500/10'
+                        : 'text-red-600 dark:text-red-400 bg-red-500/10'
                   }`}>
                     {stock.change == null ? <Minus size={12} />
                       : stock.change >= 0 ? <ArrowUpRight size={13} />
-                      : <ArrowDownRight size={13} />}
+                        : <ArrowDownRight size={13} />}
                     {stock.change != null ? fmtChange(stock.change) : '—'}
                   </div>
                 </div>

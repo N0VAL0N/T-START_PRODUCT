@@ -1,15 +1,12 @@
 import { resolveOutfit } from '../data/outfits';
 
-// Универсальный маскот Ти-Стартик.
-// Показывает картинку текущего наряда + небольшой декоративный аксессуар (эмодзи),
-// чтобы комплекты визуально отличались. size — сторона в px.
+// Универсальный маскот Ти-Стартик — ТОЛЬКО картинка текущего наряда.
+// size — сторона в px (или строка вроде "100%").
+// Бейдж/аксессуар рисуется отдельно там, где нужен (см. Wardrobe), а не здесь.
 //
 // Использование: <Mascot outfitId={activeOutfit} size={64} />
-export default function Mascot({ outfitId, size = 64, className = '', withBadge = true }) {
+export default function Mascot({ outfitId, size = 64, className = '' }) {
   const outfit = resolveOutfit(outfitId);
-  // badgeFont — только для числового size; для «100%»/vw бейдж скрываем,
-  // чтобы не ломать fontSize (Math.round(NaN)).
-  const badgeFont = typeof size === 'number' ? Math.max(12, Math.round(size * 0.28)) : null;
 
   return (
     <div
@@ -23,15 +20,6 @@ export default function Mascot({ outfitId, size = 64, className = '', withBadge 
         draggable={false}
         onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
       />
-      {withBadge && badgeFont && outfit.badge && outfit.id !== 'default' && (
-        <span
-          className="absolute -bottom-1 -right-1 leading-none select-none drop-shadow"
-          style={{ fontSize: badgeFont }}
-          aria-hidden="true"
-        >
-          {outfit.badge}
-        </span>
-      )}
     </div>
   );
 }

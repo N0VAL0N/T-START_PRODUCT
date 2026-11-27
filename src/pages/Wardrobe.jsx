@@ -36,7 +36,7 @@ export default function Wardrobe() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto w-full pb-20 px-4">
+    <div className="page-container page-container--default px-4">
       {/* Кнопка Назад */}
       <button
         onClick={() => navigate(-1)}
@@ -125,7 +125,17 @@ export default function Wardrobe() {
               `}
             >
               <div className={`w-20 h-20 mb-2 relative ${!isUnlocked ? 'grayscale' : ''}`}>
-                <Mascot outfitId={outfit.id} size={80} withBadge={isUnlocked} />
+                <Mascot outfitId={outfit.id} size={80} />
+                {/* Бейдж наряда рисуем отдельно (только для открытых, кроме базового). */}
+                {isUnlocked && outfit.badge && outfit.id !== 'default' && (
+                  <span
+                    className="absolute -bottom-1 -right-1 leading-none select-none drop-shadow"
+                    style={{ fontSize: 22 }}
+                    aria-hidden="true"
+                  >
+                    {outfit.badge}
+                  </span>
+                )}
                 {!isUnlocked && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-xl backdrop-blur-sm">
                     <Lock className="text-white w-6 h-6" />

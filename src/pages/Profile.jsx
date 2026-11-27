@@ -19,7 +19,7 @@ export default function Profile({ userData, updateAvatar }) {
   };
 
   return (
-    <div className="max-w-4xl mx-auto w-full">
+    <div className="page-container page-container--default">
       <header className="flex justify-between items-center mb-6">
         <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">Профиль</h1>
         <button onClick={() => navigate('/settings')} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors">

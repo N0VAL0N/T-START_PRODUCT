@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -10,6 +10,7 @@ import { CHAPTERS } from '../data/chapters';
 import { computeReadiness } from '../utils/readiness';
 import { isInvestConfigured } from '../services/invest';
 import Mascot from '../components/Mascot';
+import { useSpeech } from '../hooks/useSpeech';
 import { useUserStore } from '../store/userStore';
 
 export default function Story({ userData, trackEvent, chaptersDone = [], onChapterComplete, onOpenRealAccount }) {
@@ -25,8 +26,13 @@ export default function Story({ userData, trackEvent, chaptersDone = [], onChapt
 
   const [history, setHistory] = useState([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [isAutoPlay, setIsAutoPlay] = useState(false);
+
+  // Озвучка — в хуке (Web Speech API).
+  const { speak, stop: stopSpeech, isSpeaking } = useSpeech();
+  // Ref «шаг уже озвучен» — гарантирует, что автовоспроизведение на текущей
+  // ноде запускается РОВНО ОДИН раз (не зацикливается на ре-рендерах от isSpeaking).
+  const spokenStepRef = useRef(null);
 
   const completedSet = new Set(chaptersDone);
   const allDone = CHAPTERS.every(c => completedSet.has(c.id));
@@ -37,84 +43,15 @@ export default function Story({ userData, trackEvent, chaptersDone = [], onChapt
 
   const isLocked = (idx) => idx > 0 && !completedSet.has(CHAPTERS[idx - 1].id);
 
-  // Сброс речи при смене ноды. Флаг isSpeaking сбрасывают обработчики
-  // utterance (onend/onerror), поэтому здесь setState не нужен (без каскадного рендера).
+  // Сброс речи при смене ноды и обнуление флага «шаг озвучен».
   useEffect(() => {
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    stopSpeech();
+    spokenStepRef.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentNodeId, chapter]);
 
-  // Логика автовоспроизведения.
-  // Эффект — только побочные действия (речь) без setState. На вопросах
-  // авточтение молча останавливается (не листаем дальше), состояние тумблера
-  // выключается в обработчике ответа (handleAnswer).
-  useEffect(() => {
-    if (!isAutoPlay || !chapter) return;
-    
-    const currentNode = chapter.nodes.find(n => n.id === currentNodeId);
-    if (!currentNode || !currentNode.text) return;
-
-    // На вопросе просто озвучиваем, но дальше не листаем.
-    if (currentNode.type === 'question') {
-      startSpeech(currentNode.text);
-      return () => {
-        if (window.speechSynthesis) window.speechSynthesis.cancel();
-      };
-    }
-
-    startSpeech(currentNode.text, () => {
-      if (currentNode.next) {
-        setTimeout(() => {
-          if (isAutoPlay) handleNext();
-        }, 2000);
-      }
-    });
-
-    return () => {
-      if (window.speechSynthesis) window.speechSynthesis.cancel();
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentNodeId, isAutoPlay, chapter]);
-
-  function getRussianVoice() {
-    if (!window.speechSynthesis) return null;
-    const voices = window.speechSynthesis.getVoices();
-    return voices.find(v => v.lang.includes('ru')) || voices[0];
-  }
-
-  function startSpeech(text, onEndCallback) {
-    if (!window.speechSynthesis) return;
-    
-    // Фикс для Яндекса (и других хромоподобных): очищаем очередь и делаем "пустой" вызов
-    window.speechSynthesis.cancel();
-    
-    // Небольшая задержка, чтобы движок успел "проснуться"
-    setTimeout(() => {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'ru-RU';
-      const voice = getRussianVoice();
-      if (voice) utterance.voice = voice;
-      utterance.rate = 1;
-
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => {
-        setIsSpeaking(false);
-        if (onEndCallback) onEndCallback();
-      };
-      utterance.onerror = (e) => {
-        console.error('Speech error:', e);
-        setIsSpeaking(false);
-        // Если ошибка, пробуем еще раз с другими настройками (для Яндекса)
-        if (e.error === 'synthesis-failed') {
-           const retryUtterance = new SpeechSynthesisUtterance(text);
-           retryUtterance.lang = 'ru-RU';
-           retryUtterance.rate = 0.9; // Чуть медленнее
-           window.speechSynthesis.speak(retryUtterance);
-        }
-      };
-      
-      window.speechSynthesis.speak(utterance);
-    }, 50);
-  }
+  // Автовоспроизведение объявлено ниже (после handleNext), чтобы ссылаться
+  // на функцию без обращения к переменной до её объявления.
 
   const openChapter = (ch) => {
     setChapter(ch);
@@ -129,7 +66,7 @@ export default function Story({ userData, trackEvent, chaptersDone = [], onChapt
     setChapter(null); 
     setAnswered(null); 
     setIsAutoPlay(false);
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    stopSpeech();
   };
 
   const handleNext = () => {
@@ -167,37 +104,54 @@ export default function Story({ userData, trackEvent, chaptersDone = [], onChapt
     }
   };
 
-  const toggleSpeech = () => {
-    if (!window.speechSynthesis) return alert('Ваш браузер не поддерживает озвучку');
-    
-    if (isSpeaking) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
+  // Автовоспроизведение: эффект — только побочные действия (речь), без setState.
+  // spokenStepRef гарантирует, что на текущей ноде speak() вызывается РОВНО ОДИН раз
+  // (ре-рендеры от isSpeaking не должны перезапускать озвучку → петля устранена).
+  useEffect(() => {
+    if (!isAutoPlay || !chapter) return;
+
+    const currentNode = chapter.nodes.find((n) => n.id === currentNodeId);
+    if (!currentNode || !currentNode.text) return;
+
+    // На вопросе — озвучиваем один раз и не листаем дальше.
+    if (currentNode.type === 'question') {
+      if (spokenStepRef.current !== currentNodeId) {
+        spokenStepRef.current = currentNodeId;
+        speak(currentNode.text);
+      }
       return;
     }
 
+    if (spokenStepRef.current !== currentNodeId) {
+      spokenStepRef.current = currentNodeId;
+      speak(currentNode.text, () => {
+        if (currentNode.next) {
+          setTimeout(() => { if (isAutoPlay) handleNext(); }, 2000);
+        }
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentNodeId, isAutoPlay, chapter]);
+
+  const toggleSpeech = () => {
+    if (isSpeaking) { stopSpeech(); return; }
+
     const currentNode = chapter?.nodes.find(n => n.id === currentNodeId);
     if (!currentNode?.text) return;
-    
-    window.speechSynthesis.cancel();
-    startSpeech(currentNode.text);
+
+    // Ручное озвучивание не должно потом «дёргать» автоперелистывание.
+    spokenStepRef.current = currentNodeId;
+    speak(currentNode.text);
   };
 
   const toggleAutoPlay = () => {
     if (isAutoPlay) {
       setIsAutoPlay(false);
-      if (window.speechSynthesis) window.speechSynthesis.cancel();
-      setIsSpeaking(false);
+      stopSpeech();
     } else {
+      // Сброс флага, чтобы автоплеер заново озвучил текущий шаг.
+      spokenStepRef.current = null;
       setIsAutoPlay(true);
-      const currentNode = chapter?.nodes.find(n => n.id === currentNodeId);
-      if (currentNode?.text) {
-         startSpeech(currentNode.text, () => {
-            setTimeout(() => {
-               if (currentNode.next) handleNext();
-            }, 2000);
-         });
-      }
     }
   };
 
@@ -335,7 +289,7 @@ export default function Story({ userData, trackEvent, chaptersDone = [], onChapt
 
   // ===== Экран карточек (Вертикальный зигзаг) =====
   return (
-    <div className="max-w-4xl mx-auto w-full pb-20 relative px-4">
+    <div className="page-container page-container--default relative px-4">
       <header className="flex flex-col items-center justify-center mb-12 pt-10 text-center">
         <div className="p-3 bg-yellow-500/10 rounded-full mb-4 border border-yellow-500/20 shadow-[0_0_20px_rgba(250,204,21,0.15)]">
           <BookOpen size={32} className="text-yellow-500" />

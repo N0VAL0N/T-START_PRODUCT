@@ -50,7 +50,7 @@ export default function Dashboard({ userData, onOpenChat, trackEvent }) {
   const goalProgress = Math.min(Math.round((portfolioValue / goalAmount) * 100), 100);
 
   return (
-    <div className="max-w-6xl mx-auto w-full">
+    <div className="page-container page-container--wide">
       <header className="flex justify-between items-center mb-6">
         <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">T-Start</h1>
 

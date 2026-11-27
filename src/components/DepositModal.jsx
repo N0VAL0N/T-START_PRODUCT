@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Coins, Plus, Gift, Loader2, AlertTriangle, ShieldCheck } from 'lucide-react';
 import SettingsModal from './SettingsModal';
 import { useUserStore } from '../store/userStore';
@@ -28,13 +28,21 @@ export default function DepositModal({ open, onClose, onDeposit, userData = null
   // Стабильный id пользователя для учёта лимита (имя достаточно для этого демо).
   const userId = userData?.name || 'anon';
   const trackEvent = useUserStore((s) => s.trackEvent);
+  // Ключ «эпизода»: не даём повторно дёрнуть сервер при ре-рендерах/StrictMode,
+  // пока модалку не закрыли и не открыли заново.
+  const loadedKeyRef = useRef(null);
 
-  // Подгружаем статус лимита при открытии.
+  // Подгружаем статус лимита при открытии (прошлый остаток мог устареть).
   useEffect(() => {
     if (!open) return;
+    const key = `${userId}`;
+    if (loadedKeyRef.current === key) return;
+    loadedKeyRef.current = key;
+
     let cancelled = false;
     setError('');
     setDone(null);
+    setTaskClaimed(false);
     setLoading(true);
     fetchDepositLimit(userId)
       .then((s) => { if (!cancelled) setStatus(s); })
@@ -42,6 +50,11 @@ export default function DepositModal({ open, onClose, onDeposit, userData = null
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [open, userId]);
+
+  // Сброс «эпизода» — когда модалку закрыли, при следующем открытии перезапросим.
+  useEffect(() => {
+    if (!open) loadedKeyRef.current = null;
+  }, [open]);
 
   if (!open) return null;
 

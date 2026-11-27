@@ -12,9 +12,22 @@ import { useUserStore } from '../store/userStore';
 
 const FRIEND_TICKERS = ['SBER', 'ROSN', 'LKOH', 'GAZP', 'TATN', 'GMKN', 'MTSS', 'PLZL'];
 
+// Простой строковый хеш (djb2) → стабильная часть кода от имени.
+// Плюс случайное число, чтобы одноимённые пользователи получали разные коды.
+function hashName(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
+  return h;
+}
+
 function makeInviteCode(name) {
-  const base = (name || 'TS').replace(/[^a-zA-Zа-яА-Я0-9]/g, '').toUpperCase().slice(0, 4) || 'TS';
-  return `${base}-STAR`;
+
+
+  const clean = (name || 'TS').replace(/[^a-zA-Zа-яА-Я0-9]/g, '').toUpperCase().slice(0, 4) || 'TS';
+  const hash = hashName(name || 'TS') % 900;          // 0..899
+  const rand = Math.floor(Math.random() * 90 + 10);   // 10..99
+  // Вид: ИВАН-348 (префикс из имени + 3 цифры: часть хеша и случайность).
+  return `${clean}-${String(hash + rand).padStart(3, '0').slice(-3)}`;
 }
 
 export default function Tournament({ userData, updateUserData, trackEvent }) {
@@ -23,7 +36,9 @@ export default function Tournament({ userData, updateUserData, trackEvent }) {
   const [copied, setCopied] = useState(false);
 
   const friends = useMemo(() => userData.friendInvites || [], [userData.friendInvites]);
-  const myCode = makeInviteCode(userData.name);
+  // Код стабилен на сессию для одного имени: рандомный суффикс считаем ОДИН раз,
+  // иначе код менялся бы на каждом ре-рендере. useMemo ключ — имя.
+  const myCode = useMemo(() => makeInviteCode(userData.name), [userData.name]);
   const stocks = useMemo(() => userData.portfolioStocks || [], [userData.portfolioStocks]);
 
   // Тикеры для котировок: только портфель пользователя + тикеры друзей.
@@ -107,7 +122,7 @@ export default function Tournament({ userData, updateUserData, trackEvent }) {
   };
 
   return (
-    <div className="max-w-2xl mx-auto w-full">
+    <div className="page-container page-container--narrow">
       <header className="flex items-center gap-4 mb-6">
         <button onClick={() => navigate(-1)} className="p-2 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-full transition-colors text-gray-900 dark:text-white">
           <ArrowLeft size={24} />
