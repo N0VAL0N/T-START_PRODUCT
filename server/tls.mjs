@@ -2,10 +2,30 @@ import https from 'node:https';
 import tls from 'node:tls';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Папка certs/ с корневыми CA (Минцифры и т.п.). В serverless (Vercel) файлы
+// кладутся в бандл через vercel.json → functions.includeFiles: "certs/**".
+// __dirname нам недоступен напрямую (ESM), поэтому берём от import.meta и
+// проверяем несколько вероятных мест: рядом с файлом, в корне функции (/var/task).
+function resolveCertsDir(root) {
+  const here = fileURLToPath(new URL('.', import.meta.url)); // .../server/
+  const candidates = [
+    join(root, 'certs'),     // основной путь, вычисленный в index.mjs
+    join(here, '..', 'certs'), // рядом с папкой server/
+    join(process.cwd(), 'certs'), // cwd функции (Vercel: /var/task)
+  ];
+  for (const dir of candidates) {
+    try {
+      if (existsSync(dir) && readdirSync(dir).some(n => /\.(pem|cer|crt)$/i.test(n))) return dir;
+    } catch { /* ignore */ }
+  }
+  return candidates[0];
+}
 
 export function createHttpsJson(root, config) {
   const EXTRA_CAS = [];
-  const certsDir = join(root, 'certs');
+  const certsDir = resolveCertsDir(root);
   if (existsSync(certsDir)) {
     for (const name of readdirSync(certsDir)) {
       if (/\.(pem|cer|crt)$/i.test(name)) {
@@ -14,7 +34,11 @@ export function createHttpsJson(root, config) {
     }
   }
   const SYSTEM_CAS = tls.rootCertificates.map(pem => Buffer.from(pem));
-  const TRUSTED_CA = EXTRA_CAS.length ? [...EXTRA_CAS, ...SYSTEM_CAS] : undefined;
+  // Корневые CA из репозитория + системные — так доверие сохраняется и для T-Invest, и для остальных.
+  const TRUSTED_CA = EXTRA_CAS.length ? [...SYSTEM_CAS, ...EXTRA_CAS] : undefined;
+  if (!TRUSTED_CA && !config.INSECURE_TLS) {
+    console.warn(`[tls] CA не найдены в ${certsDir} — проверь, что certs/ попал в бандл (vercel includeFiles).`);
+  }
 
   return function httpsJson(url, { method = 'GET', headers = {}, body } = {}) {
     return new Promise((resolve, reject) => {
