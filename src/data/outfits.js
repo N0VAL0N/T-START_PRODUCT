@@ -50,7 +50,7 @@ export const OUTFITS = [
   {
     id: 'smart',
     name: 'Умник',
-    desc: 'Очки и лупа. Пройди все главы путешествия.',
+    desc: 'Пройди все главы путешествия.',
     image: png('smart'),
     accent: 'from-violet-400 to-purple-600',
     badge: '🤓',
