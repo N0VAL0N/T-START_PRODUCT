@@ -91,10 +91,19 @@ export const useUserStore = create(
     (set) => ({
       userData: null,
       isDark: true,
+      // Пройден ли онбординг (7 экранов). Отдельный флаг от userData,
+      // чтобы после онбординга показать экран входа, а данные создать после логина.
+      onboardingDone: false,
+      // id/логин серверного пользователя (из /api/auth), если аккаунты включены.
+      serverUser: null,
       // true, когда persist закончил читать IndexedDB. До этого UI не должен
       // показывать онбординг — иначе будет «мигание» при обновлении страницы.
       _hasHydrated: false,
       setHasHydrated: (v) => set({ _hasHydrated: v }),
+
+      // ---------- онбординг / пользователь ----------
+      setOnboardingDone: () => set({ onboardingDone: true }),
+      setUser: (user) => set({ serverUser: user || null }),
 
       // Кэш живых котировок (НЕ персистится — только текущая сессия).
       // Структура: { [ticker]: quote }. Источник — /api/quotes (реальный API).
@@ -245,8 +254,13 @@ export const useUserStore = create(
     {
       name: STORAGE_KEY,
       storage: createJSONStorage(() => idbStorage),
-      // Восстанавливаем только userData и тему; котировки не персистим.
-      partialize: (state) => ({ userData: state.userData, isDark: state.isDark }),
+      // Восстанавливаем только нужное; котировки не персистим.
+      partialize: (state) => ({
+        userData: state.userData,
+        isDark: state.isDark,
+        onboardingDone: state.onboardingDone,
+        serverUser: state.serverUser,
+      }),
       // Миграция/нормализация при загрузке + защита от битого стора.
       merge: (persisted, current) => {
         try {
@@ -254,6 +268,8 @@ export const useUserStore = create(
           return {
             ...current,
             isDark: typeof p.isDark === 'boolean' ? p.isDark : current.isDark,
+            onboardingDone: typeof p.onboardingDone === 'boolean' ? p.onboardingDone : false,
+            serverUser: p.serverUser || null,
             userData: normalizeUserData(p.userData),
           };
         } catch (e) {
