@@ -61,3 +61,35 @@ export async function fetchShares() {
   const data = await res.json();
   return data.shares || [];
 }
+
+/**
+ * Статус дневного лимита пополнений (виртуальные рубли песочницы).
+ * Возвращает { limit, used, remaining }.
+ */
+export async function fetchDepositLimit(userId) {
+  const res = await fetch(`${API}/deposit/limit?userId=${encodeURIComponent(userId || 'anon')}`);
+  if (!res.ok) throw new Error(`DEPOSIT_LIMIT_ERROR_${res.status}`);
+  return res.json();
+}
+
+/**
+ * Заявка на пополнение с серверной проверкой дневного лимита.
+ * Возвращает { ok, amount, limit, used, remaining }.
+ * При превышении лимита бросает Error с полем .code = 'DEPOSIT_LIMIT_EXCEEDED'
+ * и .status = { limit, used, remaining }.
+ */
+export async function requestDeposit(userId, amount, reason = null) {
+  const res = await fetch(`${API}/deposit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, amount, reason }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data?.message || data?.error || `DEPOSIT_ERROR_${res.status}`);
+    err.code = data?.error || 'DEPOSIT_ERROR';
+    err.status = { limit: data?.limit, used: data?.used, remaining: data?.remaining };
+    throw err;
+  }
+  return data;
+}

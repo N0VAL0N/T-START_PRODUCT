@@ -165,11 +165,10 @@ export default function Dashboard({ userData, onOpenChat, trackEvent }) {
       <DepositModal
         open={depositOpen}
         onClose={() => setDepositOpen(false)}
+        userData={userData}
         onDeposit={(amount) => {
           const current = Number(userData.balance) || 0;
           setBalance(current + amount);
-          trackEvent(`Пополнение на ${amount} ₽`);
-          setDepositOpen(false);
         }}
       />
     </div>

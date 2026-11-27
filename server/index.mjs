@@ -228,6 +228,45 @@ const queuedOrders = new Map();  // id -> order
 let orderSeq = 1;
 const nextOrderId = () => `PO-${String(orderSeq++).padStart(4, '0')}`;
 
+// ---------- Лимит пополнений (виртуальные рубли песочницы) ----------
+// Ключ — идентификатор пользователя (фронт присылает его в payin/limit).
+// Значение — { date: 'YYYY-MM-DD', used: number }.
+// Лимит: не более DEPOSIT_DAILY_LIMIT рублей в календарный день.
+const DEPOSIT_DAILY_LIMIT = Number(ENV.SANDBOX_DEPOSIT_DAILY_LIMIT || 5000);
+const depositUsage = new Map(); // userId -> { date, used }
+
+const todayKey = () => new Date().toISOString().slice(0, 10); // UTC-день
+
+/** Сколько ещё можно пополнить сегодня пользователю. */
+function getDepositStatus(userId) {
+  const key = String(userId || 'anon');
+  const rec = depositUsage.get(key);
+  const today = todayKey();
+  const used = rec && rec.date === today ? rec.used : 0;
+  return { limit: DEPOSIT_DAILY_LIMIT, used, remaining: Math.max(0, DEPOSIT_DAILY_LIMIT - used) };
+}
+
+/**
+ * Зарегистрировать пополнение с учётом дневного лимита.
+ * Бросает DEPOSIT_LIMIT_EXCEEDED, если сумма превышает остаток.
+ * Возвращает обновлённый статус.
+ */
+function registerDeposit(userId, amount) {
+  const value = Math.round(Number(amount) || 0);
+  if (value <= 0) throw new Error('BAD_AMOUNT');
+  const key = String(userId || 'anon');
+  const today = todayKey();
+  const rec = depositUsage.get(key);
+  const used = rec && rec.date === today ? rec.used : 0;
+  if (used + value > DEPOSIT_DAILY_LIMIT) {
+    const err = new Error('DEPOSIT_LIMIT_EXCEEDED');
+    err.remaining = Math.max(0, DEPOSIT_DAILY_LIMIT - used);
+    throw err;
+  }
+  depositUsage.set(key, { date: today, used: used + value });
+  return { limit: DEPOSIT_DAILY_LIMIT, used: used + value, remaining: Math.max(0, DEPOSIT_DAILY_LIMIT - (used + value)) };
+}
+
 // ---------- Инструменты и котировки ----------
 // Цены/имена берём строго из API. Список акций — из песочницы (InstrumentsService/Shares).
 const sharesCache = new Map(); // ticker -> { ticker, uid, figi, lot, name, classCode }
@@ -623,7 +662,7 @@ async function retryQueued() {
   return results;
 }
 
-// ---------- AI (Yandex) ----------
+// ---------- AI (DeepSeek) ----------
 /**
  * Промпт: модель — ЖИВОЙ разговорный ассистент «Ти-Стартик».
  * Она свободно общается (объясняет, отвечает на вопросы, поддерживает диалог),
@@ -632,32 +671,68 @@ async function retryQueued() {
  *   [[TRADE:{"action":"buy","ticker":"SBER","lots":1}]]
  * Так пользователь видит нормальную речь, а фронт получает структуру для заявки.
  * Цены и баланс проверяет БЭКЕНД, не модель.
+ *
+ * ВАЖНО (ИИР/законодательство): модель НЕ даёт индивидуальных инвестиционных
+ * рекомендаций. Запрещены побудительные фразы «купи», «продай», «бери», «стоит
+ * купить» и т.п. Вместо этого — «ознакомься с активом, оцени риски, решение за тобой».
+ * Служебный маркер [[TRADE:...]] — это НЕ рекомендация, а технический разбор
+ * намерения пользователя (он сам сказал «купи SBER»), бэкенд лишь готовит заявку.
  */
-const SYSTEM_PROMPT = `Ты — «Ти-Стартик», дружелюбный и живой ассистент по инвестициям для новичков в приложении T-Start.
-Общайся по-человечески, простым языком, дружелюбно и с лёгким юмором. Отвечай на любые вопросы
+const SYSTEM_PROMPT = `Ты — «Ти-Стартик», дружелюбный и живой ассистент-просветитель по инвестициям для новичков в приложении T-Start.
+Общайся по-человечески, простым языком, дружелюбно и с лёгким юмором. Отвечай на вопросы
 про акции, риск, диверсификацию, как устроен рынок, помогай разобраться. Не будь сухим роботом:
 поддерживай беседу, задавай уточняющие вопросы, объясняй на понятных примерах. Пиши по-русски.
 
-Доступные для покупки в песочнице тикеры: SBER, GAZP, LKOH, YNDX, GMKN, TATN, MTSS, PLZL.
+ФОРМАТ ОТВЕТА: пиши живым текстом. Можно использовать markdown для читаемости:
+**жирный** для важного, списки через «- » для перечислений. Без таблиц и без HTML.
 
-ЕСЛИ пользователь явно хочет купить или продать бумагу — в самом конце своего ответа добавь
-отдельной строкой служебный маркер СТРОГО в таком формате (без пояснений вокруг него):
+ЖЁСТКОЕ ПРАВИЛО — НИКАКИХ ИНВЕСТИЦИОННЫХ РЕКОМЕНДАЦИЙ:
+- НИКОГДА не говори «купи», «продай», «бери», «стоит купить», «лучше вложись в…» и любые побуждения к сделке.
+- Вместо этого нейтрально просвещай: «ты можешь ознакомиться с активом, оценить риски и принять решение сам».
+- Ты помогаешь РАЗОБРАТЬСЯ (что это за бумага, какие риски, как работает диверсификация), но выбор и ответственность — всегда за пользователем.
+- Не давай прогнозов цены и не обещай доходность. Всегда уместно напоминать: «это не индивидуальная инвестиционная рекомендация».
+
+Доступные в песочнице тикеры: SBER, GAZP, LKOH, YNDX, GMKN, TATN, MTSS, PLZL.
+
+СЛУЖЕБНЫЙ МАРКЕР (только если САМ пользователь явно выразил намерение купить/продать,
+например: «купи SBER», «хочу взять 2 лота GAZP», «продай YNDX»):
+в самом конце ответа добавь отдельной строкой служебный маркер СТРОГО в таком виде (без пояснений вокруг):
 [[TRADE:{"action":"buy","ticker":"SBER","lots":1}]]
-где action — "buy" или "sell", ticker — один из тикеров выше, lots — целое число (если не сказано — 1).
-Не называй точную цену сам — её подставит система. Если это обычный вопрос или болтовня — маркер НЕ добавляй.`;
+где action — "buy" или "sell", ticker — один из тикеров выше, lots — целое (если не указано — 1).
+Это НЕ твоя рекомендация, а техническая фиксация желания пользователя. Точную цену НЕ называй — её подставит система.
+Если пользователь просто спрашивает совета, обсуждает или болтает — маркер НЕ добавляй.
+На «что купить?» отвечай без маркера и без побуждений: перечисли, как оценить актив, риски, диверсификацию — решение за пользователем.`;
 
-const TRADE_MARKER = /\[\[TRADE:\s*(\{[\s\S]*?\})\s*\]\]/i;
+// Ищем ВСЕ служебные маркеры в тексте (модель может вернуть несколько).
+const TRADE_MARKER_G = /\[\[TRADE:\s*(\{[\s\S]*?\})\s*\]\]/gi;
 
-/** Вырезать служебный маркер из текста и вернуть { text, trade }. */
-function splitTradeMarker(raw) {
-  if (!raw) return { text: '', trade: null };
-  let trade = null;
-  const m = raw.match(TRADE_MARKER);
-  if (m) {
-    try { trade = JSON.parse(m[1]); } catch { trade = null; }
+/**
+ * Вырезать ВСЕ служебные маркеры из текста и собрать их в массив metadata.
+ * Возвращает { text, metadata } где metadata — [{ action, ticker, lots }].
+ * Текст никогда не содержит сырых [[TRADE:...]] — только чистую речь модели.
+ */
+function splitTradeMarkers(raw) {
+  if (!raw) return { text: '', metadata: [] };
+  const metadata = [];
+  for (const m of raw.matchAll(TRADE_MARKER_G)) {
+    try {
+      const parsed = JSON.parse(m[1]);
+      if (parsed && parsed.ticker) {
+        metadata.push({
+          action: parsed.action === 'sell' ? 'sell' : 'buy',
+          ticker: String(parsed.ticker).toUpperCase(),
+          lots: Number(parsed.lots) || 1,
+        });
+      }
+    } catch { /* битый маркер — просто вырежем */ }
   }
-  const text = raw.replace(TRADE_MARKER, '').trim();
-  return { text, trade };
+  // Убираем любые остатки маркеров (на случай «кривого» JSON) и лишние пустые строки.
+  const text = raw
+    .replace(TRADE_MARKER_G, '')
+    .replace(/\[\[\s*TRADE:[\s\S]*?\]\]/gi, '') // добить невалидные хвосты
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return { text, metadata };
 }
 
 /**
@@ -689,83 +764,129 @@ async function askAI(history) {
 }
 
 /**
- * Обработка чата — два режима:
- *  1) Обычный разговор: возвращаем естественный ответ модели как есть.
- *  2) Есть намерение купить/продать: сохраняем живой текст модели,
- *     подтягиваем РЕАЛЬНУЮ цену из API, валидируем баланс, готовим заявку (PENDING).
+ * Обработка чата:
+ *  1) Обычный разговор: возвращаем естественный ответ модели (Markdown допустим).
+ *  2) Есть намерение купить/продать (маркер модели ИЛИ fallback по словам юзера):
+ *     подтягиваем РЕАЛЬНУЮ цену, валидируем баланс, готовим заявку(и) (PENDING).
+ *
+ * ВАЖНО: в режиме Sandbox НЕ требуем профиль/регистрацию — счёт создаётся бэкендом
+ * лениво (execution происходит только по подтверждению, accountId подставит confirm).
+ *
+ * Ответ: { text, metadata: [order...], pending?, orderId?, ticker?, lots? }
+ *  - text      — ЧИСТЫЙ текст без сырых [[TRADE:...]] (см. splitTradeMarkers);
+ *  - metadata  — массив подготовленных заявок (для рендера кнопок на фронте);
+ *  - pending / orderId / ticker / lots — обратная совместимость (первая заявка).
  */
 async function handleChat({ history = [], userContext = {} }) {
   const balance = Number(userContext?.balance);
 
   if (!AI_READY) {
-    return { text: 'ИИ временно недоступен (нет ключей на сервере). Попробуй позже.', pending: null };
+    return { text: 'ИИ временно недоступен (нет ключей на сервере). Попробуй позже.', metadata: [] };
   }
 
-  const raw = await askAI(history);
-  const { text: cleanText, trade } = splitTradeMarker(raw);
+  let raw;
+  try {
+    raw = await askAI(history);
+  } catch (e) {
+    return { text: `Не получилось получить ответ ассистента (${e.message.slice(0, 80)}). Попробуй ещё раз.`, metadata: [] };
+  }
 
-  // Определяем намерение: маркер модели → иначе fallback по тексту пользователя.
-  let intent = trade;
-  if (!intent || !intent.ticker) {
+  // Вырезаем ВСЕ маркеры из видимого текста и собираем их в metadata.
+  const { text: cleanText, metadata: modelIntents } = splitTradeMarkers(raw);
+
+  // Намерения: сначала из маркеров модели; если их нет — пробуем fallback по словам юзера.
+  let intents = modelIntents;
+  if (!intents.length) {
     const lastUser = [...history].reverse().find((m) => m.role === 'user');
     const fb = fallbackIntent(lastUser?.content || '');
-    if (fb) intent = fb;
+    if (fb) intents = [fb];
   }
 
-  // 1) Нет намерения торговать — обычный разговорный ответ.
-  if (!intent || !intent.ticker) {
-    const reply = cleanText || raw.replace(TRADE_MARKER, '').trim();
+  // 1) Нет намерений торговать — обычный разговорный ответ.
+  if (!intents.length) {
     return {
-      text: reply || 'Привет! Я Ти-Стартик. Спроси про акции, риск или скажи «купи SBER» — помогу разобраться.',
-      pending: null,
+      text: cleanText || 'Привет! Я Ти-Стартик. Расскажу про акции и риски, помогу разобраться. Спрашивай!',
+      metadata: [],
     };
   }
 
-  // Тикер из ответа модели — не доверяем напрямую: валидируем формат и наличие у брокера.
-  let ticker, lots, action;
-  try {
-    ticker = await resolveTradeableShare(intent.ticker);
-    ticker = ticker.ticker;
-    lots = sanitizeLots(intent.lots ?? 1);
-    action = intent.action === 'sell' ? 'sell' : 'buy';
-  } catch (e) {
-    if (e.message === 'TICKER_NOT_ALLOWED') {
-      return { text: `Такой бумаги (${String(intent.ticker).toUpperCase()}) нет в списке торгуемых. Уточни тикер?`, pending: null };
+  // 2) По каждому намерению готовим заявку (не более 5, чтобы не спамить).
+  const prepared = [];
+  const notes = [];
+  for (const intent of intents.slice(0, 5)) {
+    let share, lots, action;
+    try {
+      share = await resolveTradeableShare(intent.ticker);
+      lots = sanitizeLots(intent.lots ?? 1);
+      action = intent.action === 'sell' ? 'sell' : 'buy';
+    } catch (e) {
+      if (e.message === 'TICKER_NOT_ALLOWED') {
+        notes.push(`Бумаги ${String(intent.ticker).toUpperCase()} нет в списке торгуемых.`);
+      } else {
+        notes.push('Не понял, о какой бумаге речь — уточни тикер.');
+      }
+      continue;
     }
-    return { text: 'Хм, не уверен, о какой бумаге речь. Уточни тикер?', pending: null };
-  }
 
-  let quote;
-  try {
-    quote = await getQuote(ticker);
-  } catch {
-    return { text: `Хм, не нашёл инструмент ${ticker}. Уточни тикер?`, pending: null };
-  }
-  if (quote.priceExact == null) {
-    return { text: `По ${ticker} сейчас нет данных по цене. Давай чуть позже?`, pending: null };
-  }
+    let quote;
+    try {
+      quote = await getQuote(share.ticker);
+    } catch {
+      notes.push(`Не нашёл инструмент ${share.ticker}.`);
+      continue;
+    }
+    if (quote.priceExact == null) {
+      notes.push(`По ${share.ticker} сейчас нет данных по цене.`);
+      continue;
+    }
 
   const estCost = Math.round(quote.priceExact * quote.lot * lots);
 
-  // Валидация баланса на сервере (для покупки).
-  if (action === 'buy' && Number.isFinite(balance) && balance < estCost) {
-    const base = cleanText || `Хотел купить ${ticker}, но...`;
+    // Валидация баланса (только для покупки, если фронт прислал баланс).
+    if (action === 'buy' && Number.isFinite(balance) && balance < estCost) {
+      notes.push(`На ${share.ticker} не хватает: ${lots} лот(а) ~${estCost} ₽, а у тебя ${balance} ₽.`);
+      continue;
+    }
+
+    // Готовим заявку (в стакан НЕ шлём — ждём подтверждения).
+    const order = await prepareOrder({ ticker: share.ticker, lots, direction: action === 'buy' ? 'BUY' : 'SELL' });
+    prepared.push({
+      id: order.id,
+      action,
+      ticker: order.ticker,
+      lots: order.lots,
+      lot: share.lot,
+      quantity: order.quantity,
+      price: quote.price,
+      priceExact: quote.priceExact,
+      estCost,
+      direction: order.direction,
+    });
+  }
+
+  // Есть готовые заявки — формируем ответ с призывом подтвердить (без ИИР-побуждений).
+  if (prepared.length) {
+    const list = prepared
+      .map((o) => `- **${o.action === 'buy' ? 'Покупка' : 'Продажа'}** ${o.ticker}: ${o.lots} лот(а) (~${o.estCost} ₽)`)
+      .join('\n');
+    const intro = cleanText ? `${cleanText}\n\n` : '';
+    const notePart = notes.length ? `\n\n_${notes.join(' ')}_` : '';
     return {
-      text: `${base}\n\nНо не хватает денег: ${lots} лот(а) ${ticker} стоит ~${estCost} ₽, а у тебя ${balance} ₽.`,
-      pending: null,
+      text: `${intro}Подготовил заявку на подтверждение:\n${list}${notePart}\n\nПроверь детали и подтверди — решение и ответственность за тобой. Это не индивидуальная инвестиционная рекомендация.`,
+      metadata: prepared,
+      // Обратная совместимость (первая заявка).
+      pending: `${prepared[0].id} ${prepared[0].ticker} ${prepared[0].lots} лот(а)`,
+      orderId: prepared[0].id,
+      ticker: prepared[0].ticker,
+      lots: prepared[0].lots,
     };
   }
 
-  // Готовим заявку (в стакан НЕ шлём — ждём подтверждения пользователя).
-  const order = await prepareOrder({ ticker, lots, direction: action === 'buy' ? 'BUY' : 'SELL' });
-  const verb = action === 'buy' ? 'купить' : 'продать';
-  const head = cleanText || `Сейчас ${ticker} стоит ~${quote.price} ₽.`;
+  // Намерения были, но ни одну заявку подготовить не удалось.
+  const reason = notes.length ? notes.join(' ') : 'Не получилось подготовить заявку.';
   return {
-    text: `${head}\n\nГотов ${verb} ${lots} лот(а) ${ticker} (~${estCost} ₽). Подтверди заявку — и я отправлю её в песочницу T-Invest.`,
-    pending: `${order.id} ${order.ticker} ${order.lots} лот(а) к ${action === 'buy' ? 'покупке' : 'продаже'}`,
-    orderId: order.id,
-    ticker: order.ticker,
-    lots: order.lots,
+    text: `${cleanText ? cleanText + '\n\n' : ''}${reason}`,
+    metadata: [],
   };
 }
 
@@ -954,6 +1075,36 @@ export async function handler(req, res) {
       const { accountId, rub } = await readBody(req);
       const r = await sandboxPayIn(accountId, rub);
       return send(res, 200, r);
+    }
+
+    // ---- Лимит пополнений: проверка дневного остатка ----
+    // GET /api/deposit/limit?userId=... — сколько ещё можно пополнить сегодня.
+    if (path === '/api/deposit/limit') {
+      const userId = url.searchParams.get('userId') || 'anon';
+      return send(res, 200, getDepositStatus(userId));
+    }
+
+    // POST /api/deposit — заявка на пополнение с серверной проверкой лимита.
+    // Тело: { userId, amount, reason? }. При превышении → 429 + remaining.
+    if (path === '/api/deposit' && req.method === 'POST') {
+      const body = await readBody(req);
+      const userId = body?.userId || 'anon';
+      const amount = Math.round(Number(body?.amount) || 0);
+      if (amount <= 0) return send(res, 400, { ok: false, error: 'BAD_AMOUNT', ...getDepositStatus(userId) });
+      try {
+        const status = registerDeposit(userId, amount);
+        return send(res, 200, { ok: true, amount, ...status });
+      } catch (e) {
+        if (e.message === 'DEPOSIT_LIMIT_EXCEEDED') {
+          return send(res, 429, {
+            ok: false,
+            error: 'DEPOSIT_LIMIT_EXCEEDED',
+            message: `Дневной лимит пополнений (${DEPOSIT_DAILY_LIMIT} ₽) исчерпан. Доступно сегодня: ${e.remaining} ₽.`,
+            ...getDepositStatus(userId),
+          });
+        }
+        throw e;
+      }
     }
 
     if (path === '/api/invest/portfolio' && req.method === 'POST') {

@@ -9,10 +9,13 @@ const API = '/api';
 export const isAiConfigured = () => true;
 
 /**
- * Отправить диалог. Возвращает { text, mcp, pending }.
- * pending — если бэкенд подготовил заявку (id/тикер), фронт рисует кнопку подтверждения.
+ * Отправить диалог. Возвращает { text, metadata, pending? }.
+ *  - text     — чистый текст без служебных [[TRADE:...]] (бэкенд их вырезает);
+ *  - metadata — массив подготовленных заявок: [{ id, action, ticker, lots, price, estCost, ... }];
+ *  - pending/orderId/ticker/lots — обратная совместимость (первая заявка).
+ * userContext: { accountId, balance } — баланс нужен бэкенду для проверки средств.
  * @param {Array<{role,content}>} history
- * @param {object} userContext  { accountId }
+ * @param {object} userContext
  */
 export async function askAssistant(history, userContext = {}) {
   const res = await fetch(`${API}/ai/chat`, {
@@ -26,5 +29,7 @@ export async function askAssistant(history, userContext = {}) {
   }
   const data = await res.json();
   if (!data?.text) throw new Error('AI_EMPTY_RESPONSE');
-  return data; // { text, mcp, pending }
+  // Нормализуем metadata к массиву (на случай старого бэка).
+  if (!Array.isArray(data.metadata)) data.metadata = [];
+  return data;
 }

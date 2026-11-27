@@ -48,14 +48,15 @@ export default function Layout({ children, isDark, setIsDark }) {
         </button>
       </aside>
 
-      {/* Контентная часть */}
+            {/* Контентная часть */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
-        <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
+        {/* pb-28 на мобилке: карточки уходят ПОД нижнюю панель, но не перекрываются ею. */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-28 md:pb-8">
           {children}
         </div>
 
-        {/* 📱 Мобилка: Нижняя навигация */}
-        <nav className={`md:hidden fixed bottom-0 w-full flex justify-around items-center py-3 px-2 border-t ${isDark ? 'bg-[#1a1a1a] border-gray-800' : 'bg-white border-gray-200'}`}>
+        {/* 📱 Мобилка: Нижняя навигация — ВСЕГДА поверх контента (z-50). */}
+        <nav className={`md:hidden fixed bottom-0 inset-x-0 z-50 flex justify-around items-center py-2.5 px-2 border-t backdrop-blur-md shadow-[0_-4px_20px_rgba(0,0,0,0.15)] ${isDark ? 'bg-[#1a1a1a]/95 border-gray-800' : 'bg-white/95 border-gray-200'}`}>
           {navItems.map((item) => (
             <NavLink
               key={item.path}
