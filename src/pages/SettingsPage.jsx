@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Lock, Newspaper, Trophy, LogOut, FlaskConical, Headphones, Activity, Coins, CreditCard, RotateCcw, ShieldCheck } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Lock, Newspaper, Trophy, LogOut, FlaskConical, Headphones, Activity, Coins, CreditCard, ShieldCheck } from 'lucide-react';
 import SettingsModal from '../components/SettingsModal';
 import Toggle from '../components/Toggle';
 import CardForm from '../components/CardForm';
 import { useUserStore } from '../store/userStore';
+import { logout as apiLogout } from '../api/auth';
 
-export default function SettingsPage({ userData, onResetAccount }) {
+export default function SettingsPage({ userData }) {
   const navigate = useNavigate();
   const [modalType, setModalType] = useState(null);
 
@@ -21,9 +22,12 @@ export default function SettingsPage({ userData, onResetAccount }) {
     setBalance((Number(userData.balance) || 0) + amount);
   };
 
-  // Выход: сброс стора (вернёт онбординг), без location.reload().
-  const handleLogout = () => {
+  // Выход: закрываем серверную сессию (cookie), чистим локальный кэш и
+  // возвращаемся к экрану входа. Перезагрузка нужна, чтобы App перечитал /api/me.
+  const handleLogout = async () => {
+    try { await apiLogout(); } catch { /* даже если сеть отвалилась — выходим локально */ }
     resetStoreAccount();
+    window.location.assign('/');
   };
 
   // CardForm отдаёт (mask, raw) после собственной валидации — здесь только применяем режим.
@@ -138,10 +142,6 @@ export default function SettingsPage({ userData, onResetAccount }) {
             <ChevronRight size={20} className="text-gray-400" />
           </div>
         </div>
-
-        <button onClick={onResetAccount} className="w-full p-4 rounded-2xl bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 font-bold flex items-center gap-3 hover:bg-yellow-500/20 transition-colors">
-          <RotateCcw size={20} /> Сбросить аккаунт и пройти онбординг заново
-        </button>
 
         <button onClick={handleLogout} className="w-full p-4 rounded-2xl bg-red-500/10 text-red-500 font-bold flex items-center gap-3 hover:bg-red-500/20 transition-colors">
           <LogOut size={20} /> Выйти из аккаунта

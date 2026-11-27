@@ -4,7 +4,9 @@ import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
 import Onboarding from './pages/Onboarding';
+import Auth from './pages/Auth';
 import { openSandboxAccount } from './services/invest';
+import { getMe } from './api/auth';
 import { useUserStore } from './store/userStore';
 
 // Тяжёлые страницы и чат грузим лениво — стартовый бандл меньше, первый экран быстрее.
@@ -28,6 +30,15 @@ function PageFallback() {
 export default function App() {
   const [isChatOpen, setIsChatOpen] = useState(false);
 
+  // --- Аутентификация ---
+  // checking  — ещё проверяем сессию (/api/me);
+  // required  — нужно войти/зарегистрироваться;
+  // ok        — есть действительная сессия;
+  // disabled  — аккаунты выключены на сервере (нет БД) → работаем как раньше.
+  const [auth, setAuth] = useState('checking');
+  const [authUser, setAuthUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
   // Глобальный стейт из Zustand (persist в IndexedDB).
   const userData = useUserStore((s) => s.userData);
   const isDark = useUserStore((s) => s.isDark);
@@ -42,7 +53,6 @@ export default function App() {
   const completeChapterAction = useUserStore((s) => s.completeChapter);
   const setSandboxAccountId = useUserStore((s) => s.setSandboxAccountId);
   const setUserDataAction = useUserStore((s) => s.setUserData);
-  const resetAccountAction = useUserStore((s) => s.resetAccount);
   const syncOutfits = useUserStore((s) => s.syncOutfits);
 
   // Тема → класс на <html>.
@@ -50,6 +60,31 @@ export default function App() {
     if (isDark) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [isDark]);
+
+  // Проверка сессии при старте. Если бэкенд говорит, что аккаунты выключены —
+  // не блокируем приложение (fallback на прежний локальный флоу).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await getMe();
+        if (cancelled) return;
+        if (data?.user) {
+          setAuthUser(data.user);
+          setAuth('ok');
+        } else {
+          setAuth('required');
+        }
+      } catch (e) {
+        // 503 ACCOUNTS_DISABLED → аккаунты выключены; прочие ошибки трактуем как «нет сессии».
+        if (e?.code === 'ACCOUNTS_DISABLED' || e?.status === 503) setAuth('disabled');
+        else setAuth('required');
+      } finally {
+        if (!cancelled) setAuthChecked(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // После загрузки данных — пересчитать открытые наряды по уже заработанным
   // достижениям (сделки/портфель/главы могли быть получены до появления нарядов).
@@ -95,10 +130,7 @@ export default function App() {
     }
   };
 
-  // Сброс аккаунта: чистит данные и возвращает онбординг (без перезагрузки страницы).
-  const resetAccount = () => {
-    resetAccountAction();
-  };
+  // Сброс аккаунта убран по требованиям; выход — в настройках.
 
   const executeTrade = (stock, price) => {
     executeTradeAction(stock, price);
@@ -109,7 +141,7 @@ export default function App() {
 
   // Пока IndexedDB не прочитан — показываем экран загрузки, а НЕ онбординг,
   // иначе при обновлении страницы мелькает онбординг и «пропадает».
-  if (!hasHydrated) {
+  if (!hasHydrated || !authChecked || auth === 'checking') {
     return (
       <div className={`min-h-screen flex items-center justify-center ${isDark ? 'bg-[#121212]' : 'bg-gray-50'}`}>
         <div className="w-10 h-10 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin" />
@@ -117,8 +149,14 @@ export default function App() {
     );
   }
 
+  // Нужен вход — показываем экран авторизации (кроме режима "disabled").
+  if (auth === 'required') {
+    return <Auth onAuthed={(user) => { setAuthUser(user); setAuth('ok'); }} />;
+  }
+
   if (!userData) {
-    return <Onboarding onComplete={handleOnboardingComplete} isDark={isDark} setIsDark={setIsDark} />;
+    // Имя берём из логина, если он есть (онбординг спросит только цель).
+    return <Onboarding onComplete={handleOnboardingComplete} isDark={isDark} setIsDark={setIsDark} presetName={authUser?.username || ''} />;
   }
 
   return (
@@ -134,7 +172,7 @@ export default function App() {
                     <Route path="/market" element={<Market onOpenChat={() => setIsChatOpen(true)} trackEvent={trackEvent} userData={userData} activeOutfit={userData?.activeOutfit} />} />
                     <Route path="/wardrobe" element={<Wardrobe />} />
                     <Route path="/profile" element={<Profile userData={userData} updateAvatar={updateAvatar} />} />
-                    <Route path="/settings" element={<SettingsPage userData={userData} onResetAccount={resetAccount} />} />
+                    <Route path="/settings" element={<SettingsPage userData={userData} />} />
                     <Route path="/tournament" element={<Tournament userData={userData} updateUserData={setUserDataAction} trackEvent={trackEvent} />} />
                     <Route path="/story" element={
                       <Story

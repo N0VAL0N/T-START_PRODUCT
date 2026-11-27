@@ -28,8 +28,13 @@ export function createConfig(root) {
     INVEST_TOKEN: ENV.TINVEST_TOKEN,
     APP_NAME: ENV.TINVEST_APP_NAME || 'T-Start',
     CONTRACT: 'tinkoff.public.invest.api.contract.v1',
-    INSECURE_TLS: ENV.TSTART_INSECURE_TLS === '1',
+        INSECURE_TLS: ENV.TSTART_INSECURE_TLS === '1',
     DEPOSIT_DAILY_LIMIT: Number(ENV.SANDBOX_DEPOSIT_DAILY_LIMIT || 5000),
+    // --- Аккаунты/БД (Vercel Postgres / Neon) ---
+    // Приоритет: DATABASE_URL, иначе Neon-набор POSTGRES_* (Vercel сам их подставляет).
+    DATABASE_URL: ENV.DATABASE_URL || ENV.POSTGRES_URL || ENV.DATABASE_URL_UNPOOLED || null,
+    // Секрет для подписи сессионных JWT. Нет секрета — аккаунты выключены (fail-closed).
+    JWT_SECRET: ENV.JWT_SECRET || null,
     ENV,
   };
 }

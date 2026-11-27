@@ -18,9 +18,12 @@ const FEATURES = [
   { icon: FlaskConical, title: 'Песочница', desc: 'Тренируйся на настоящем API Т-Инвест без риска реальных денег.' },
 ];
 
-export default function Onboarding({ onComplete, isDark }) {
+
+
+
+export default function Onboarding({ onComplete, isDark, presetName = '' }) {
   const [step, setStep] = useState(1);
-  const [name, setName] = useState('');
+  const [name, setName] = useState(presetName || '');
   const [goal, setGoal] = useState(GOALS[0].label);
 
   return (

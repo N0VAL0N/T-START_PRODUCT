@@ -10,11 +10,17 @@ import { createDeposit } from './deposit.mjs';
 import { createStatic } from './static.mjs';
 import { sanitizeHistory, fromQ } from './utils.mjs';
 import { sanitizeTicker, sanitizeLots, sanitizeDirection } from './validators.mjs';
+import { initDb } from './db.mjs';
+import { createAccounts } from './accounts.mjs';
+import { buildSessionCookie, buildClearCookie } from './auth.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 
 const config = createConfig(root);
+// Cookie с флагом Secure на проде (Vercel/HTTPS) и без — на localhost.
+// На Vercel запросы всегда https; локально TSTART_PORT на http.
+const IS_SECURE = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production' || !!process.env.TSTART_HTTPS;
 const httpsJson = createHttpsJson(root, config);
 const invest = createInvest({ httpsJson, config });
 const orders = createOrders({ investCall: invest.investCall, fromQ, getQuote: invest.getQuote, resolveTradeableShare: invest.resolveTradeableShare });
@@ -22,8 +28,15 @@ const ai = createAI({ config, invest, orders });
 const deposit = createDeposit({ config });
 const serveStatic = createStatic(root);
 
-function send(res, status, obj) {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+// --- Аккаунты (Vercel Postgres / Neon) ---
+initDb(config);
+const accounts = createAccounts({ config });
+if (!accounts.enabled) {
+  console.log('[accounts] выключены (нет DATABASE_URL и/или JWT_SECRET) — фичи аккаунтов недоступны.');
+}
+
+function send(res, status, obj, extraHeaders = {}) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', ...extraHeaders });
   res.end(JSON.stringify(obj));
 }
 function readBody(req) {
@@ -41,7 +54,45 @@ async function handler(req, res) {
 
   try {
     if (path === '/api/health') {
-      return send(res, 200, { ok: true, ai: !!config.AI_KEY, invest: !!config.INVEST_TOKEN });
+      return send(res, 200, { ok: true, ai: !!config.AI_KEY, invest: !!config.INVEST_TOKEN, accounts: accounts.enabled });
+    }
+
+    // ---------- Аккаунты ----------
+    if (path === '/api/auth/register' && req.method === 'POST') {
+      const body = await readBody(req);
+      const r = await accounts.register({ username: body.username, password: body.password });
+      if (r.setSession) {
+        const cookie = buildSessionCookie(accounts.issueToken(r.setSession), { secure: IS_SECURE });
+        return send(res, r.status, r.body, { 'Set-Cookie': cookie });
+      }
+      return send(res, r.status, r.body);
+    }
+
+    if (path === '/api/auth/login' && req.method === 'POST') {
+      const body = await readBody(req);
+      const r = await accounts.login({ username: body.username, password: body.password });
+      if (r.setSession) {
+        const cookie = buildSessionCookie(accounts.issueToken(r.setSession), { secure: IS_SECURE });
+        return send(res, r.status, r.body, { 'Set-Cookie': cookie });
+      }
+      return send(res, r.status, r.body);
+    }
+
+    if (path === '/api/auth/logout' && req.method === 'POST') {
+      const cookie = buildClearCookie({ secure: IS_SECURE });
+      return send(res, 200, { ok: true }, { 'Set-Cookie': cookie });
+    }
+
+    if (path === '/api/me' && req.method === 'GET') {
+      const r = await accounts.getMe(req);
+      return send(res, r.status, r.body);
+    }
+
+    // Частичное обновление защищаемого состояния (баланс, портфель, достижения…).
+    if (path === '/api/state' && req.method === 'PUT') {
+      const body = await readBody(req);
+      const r = await accounts.updateState(req, body);
+      return send(res, r.status, r.body);
     }
 
     if (path === '/api/invest/account' && req.method === 'POST') {
