@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Check, Lock, Sparkles, ArrowLeft, Trophy } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { OUTFITS, resolveOutfit, isOutfitUnlocked, unlockLabel } from '../data/outfits';
+import { OUTFITS, resolveOutfit, unlockLabel } from '../data/outfits';
 import { useUserStore } from '../store/userStore';
 import Mascot from '../components/Mascot';
 
@@ -21,10 +21,12 @@ export default function Wardrobe() {
   const [selectedOutfit, setSelectedOutfit] = useState(activeOutfitId);
   const currentOutfit = resolveOutfit(selectedOutfit);
   const isCurrentSelectedActive = activeOutfitId === selectedOutfit;
+  const currentUnlocked = unlockedIds.includes(currentOutfit.id);
 
+  // Клик по карточке = предпросмотр (в т.ч. закрытого наряда).
   const handleSelect = (outfit) => {
-    if (!isOutfitUnlocked(outfit, userData) && !unlockedIds.includes(outfit.id)) return;
     setSelectedOutfit(outfit.id);
+    trackEvent?.(`Предпросмотр наряда: ${outfit.name}`);
   };
 
   const handleApply = () => {
@@ -63,19 +65,34 @@ export default function Wardrobe() {
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">{currentOutfit.name}</h2>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-6 text-center max-w-sm">{currentOutfit.desc}</p>
 
-          {/* Кнопка «Надеть» / плашка «Надето» */}
+          {/* Действие: надето / надеть / заблокировано (предпросмотр) */}
           {isCurrentSelectedActive ? (
             <div className="bg-yellow-500 text-black text-sm font-bold px-4 py-2 rounded-full flex items-center gap-1.5 shadow-lg">
               <Check size={16} /> Надето
             </div>
-          ) : (
+          ) : currentUnlocked ? (
             <button
               onClick={handleApply}
-              disabled={!unlockedIds.includes(currentOutfit.id)}
-              className="bg-yellow-400 text-black font-bold px-6 py-2.5 rounded-full hover:bg-yellow-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              className="bg-yellow-400 text-black font-bold px-6 py-2.5 rounded-full hover:bg-yellow-500 transition-colors flex items-center gap-1.5"
             >
               <Check size={16} /> Надеть
             </button>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              <div className="bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-sm font-bold px-4 py-2 rounded-full flex items-center gap-1.5">
+                <Lock size={16} /> Заблокировано
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 text-center max-w-xs">
+                {unlockLabel(currentOutfit)}
+              </p>
+            </div>
+          )}
+
+          {/* Плашка «Надето сейчас» в правом верхнем углу витрины */}
+          {isCurrentSelectedActive && (
+            <div className="absolute top-4 right-4 bg-yellow-500 text-black text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1 shadow-lg">
+              <Check size={14} /> Надето
+            </div>
           )}
         </div>
       </div>
@@ -96,10 +113,10 @@ export default function Wardrobe() {
               key={outfit.id}
               onClick={() => handleSelect(outfit)}
               className={`
-                relative group rounded-2xl p-4 flex flex-col items-center transition-all duration-300
+                relative group rounded-2xl p-4 flex flex-col items-center transition-all duration-300 cursor-pointer
                 ${isUnlocked
-                  ? 'cursor-pointer bg-white dark:bg-[#1e1e1e] hover:-translate-y-1'
-                  : 'cursor-not-allowed bg-gray-100 dark:bg-[#121212] opacity-70'
+                  ? 'bg-white dark:bg-[#1e1e1e] hover:-translate-y-1'
+                  : 'bg-gray-100 dark:bg-[#121212] hover:-translate-y-0.5'
                 }
                 ${isSelected
                   ? 'border-2 border-yellow-500 shadow-[0_0_20px_rgba(250,204,21,0.2)]'
