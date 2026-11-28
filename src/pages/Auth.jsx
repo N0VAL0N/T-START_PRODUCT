@@ -4,7 +4,8 @@ import { Loader2, LogIn, UserPlus, AlertTriangle, Eye, EyeOff } from 'lucide-rea
 import { login, register } from '../api/auth';
 import { useUserStore } from '../store/userStore';
 
-export default function Auth() {
+
+export default function Auth({ onAuthed }) {
   const navigate = useNavigate();
   const [mode, setMode] = useState('login');
   const [username, setUsername] = useState('');
@@ -18,6 +19,7 @@ export default function Auth() {
   const setUser = useUserStore((s) => s.setUser);
   const setOnboardingDone = useUserStore((s) => s.setOnboardingDone);
   const completeOnboarding = useUserStore((s) => s.completeOnboarding);
+  const setSandboxAccountId = useUserStore((s) => s.setSandboxAccountId);
   const hasUserData = useUserStore((s) => !!s.userData);
 
   async function onSubmit(e) {
@@ -36,8 +38,16 @@ export default function Auth() {
       setOnboardingDone();
       // Создаём локальное состояние игрока только при первом входе,
       // чтобы не затирать уже существующий прогресс.
-      if (!hasUserData) completeOnboarding(data.user?.username || username, 'Просто попробовать');
-      navigate('/');
+      if (!hasUserData) {
+        completeOnboarding(data.user?.username || username, 'Просто попробовать');
+      } else {
+        // Профиль уже есть: сбрасываем счёт песочницы — сервер выдаст
+        // персональный счёт под ЭТОГО пользователя (привязка по userKey).
+        setSandboxAccountId(null);
+      }
+      // Переключаем App на основное приложение (не ждём navigate).
+      if (typeof onAuthed === 'function') onAuthed();
+      navigate('/', { replace: true });
     } catch (err) {
       setError(err.message || 'Не удалось выполнить вход.');
     } finally {

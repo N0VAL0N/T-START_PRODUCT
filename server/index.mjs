@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createConfig } from './config.mjs';
@@ -12,7 +13,8 @@ import { sanitizeHistory, fromQ } from './utils.mjs';
 import { sanitizeTicker, sanitizeLots, sanitizeDirection } from './validators.mjs';
 import { initDb } from './db.mjs';
 import { createAccounts } from './accounts.mjs';
-import { buildSessionCookie, buildClearCookie } from './auth.mjs';
+
+import { buildSessionCookie, buildClearCookie, parseCookies } from './auth.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -45,6 +47,19 @@ function readBody(req) {
     req.on('data', c => data += c);
     req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); } });
   });
+}
+
+// Ключ «владельца» песочницы: id залогиненного пользователя, иначе стабильный
+// анонимный клиент из cookie tstart_cid (чтобы у каждого был свой счёт).
+async function getUserKey(req) {
+  try {
+    const user = await accounts.currentUser(req);
+    if (user?.id) return `u:${user.id}`;
+  } catch { /* noop */ }
+  const cookies = parseCookies(req.headers?.cookie || '');
+  const cid = cookies.tstart_cid;
+  if (cid) return `c:${cid}`;
+  return null; // нет ключа — попросим клиента получить cookie
 }
 
 async function handler(req, res) {
@@ -96,8 +111,17 @@ async function handler(req, res) {
     }
 
     if (path === '/api/invest/account' && req.method === 'POST') {
-      const accountId = await invest.openSandbox();
-      return send(res, 200, { accountId });
+      // Ключ пользователя; если аноним без cookie — выдаём стабильный clientId.
+      let userKey = await getUserKey(req);
+      let extraHeaders = {};
+      if (!userKey) {
+        const cid = randomUUID();
+        userKey = `c:${cid}`;
+        const secure = IS_SECURE ? '; Secure' : '';
+        extraHeaders = { 'Set-Cookie': `tstart_cid=${cid}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 365}${secure}` };
+      }
+      const accountId = await invest.openSandbox(userKey);
+      return send(res, 200, { accountId }, extraHeaders);
     }
 
     if (path === '/api/invest/accounts') {

@@ -31,11 +31,13 @@ export function verifyPassword(password, stored) {
 
 export function validateCredentials(username, password) {
   const u = typeof username === 'string' ? username.trim() : '';
-  if (!/^[a-zA-Z0-9_.-]{3,24}$/.test(u)) {
-    return { ok: false, error: 'BAD_USERNAME', message: 'Логин: 3–24 символа (латиница, цифры, . _ -).' };
+  // Логин: любые символы, только ограничение по длине (3–24).
+  if (u.length < 3 || u.length > 24) {
+    return { ok: false, error: 'BAD_USERNAME', message: 'Логин: от 3 до 24 символов.' };
   }
-  if (typeof password !== 'string' || password.length < 6 || password.length > 72) {
-    return { ok: false, error: 'BAD_PASSWORD', message: 'Пароль: 6–72 символа.' };
+  // Пароль: только латиница, цифры и . _ - ; 6–72 символа.
+  if (typeof password !== 'string' || !/^[A-Za-z0-9._-]{6,72}$/.test(password)) {
+    return { ok: false, error: 'BAD_PASSWORD', message: 'Пароль: 6–72 символа, только латиница, цифры и . _ -.' };
   }
   return { ok: true, username: u };
 }

@@ -13,10 +13,13 @@ export function createInvest({ httpsJson, config }) {
       body,
     });
 
-  const sharesCache = new Map();
+    const sharesCache = new Map();
   const quotesCache = new Map();
   let allSharesCache = { at: 0, list: [] };
-  let activeAccountId = config.ENV.TINVEST_SANDBOX_ACCOUNT_ID || null;
+  // accountId персональной песочницы на каждого пользователя (ключ — userKey).
+  // Раньше была ОДНА глобальная переменная → все юзеры делили один счёт. Теперь — у каждого свой.
+  const accountByUser = new Map();
+  const FIXED_ACCOUNT_ID = config.ENV.TINVEST_SANDBOX_ACCOUNT_ID || null;
 
   async function getAllShares() {
     if (allSharesCache.list.length && Date.now() - allSharesCache.at < 6 * 60 * 60 * 1000) {
@@ -129,17 +132,25 @@ export function createInvest({ httpsJson, config }) {
     return { toppedUp: false, balance: bal };
   }
 
-  async function openSandbox() {
-    if (activeAccountId) { await ensureSandboxFunds(activeAccountId); return activeAccountId; }
-    if (config.ENV.TINVEST_SANDBOX_ACCOUNT_ID) { activeAccountId = config.ENV.TINVEST_SANDBOX_ACCOUNT_ID; await ensureSandboxFunds(activeAccountId); return activeAccountId; }
-    try {
-      const accounts = await listSandboxAccounts();
-      if (accounts.length > 0) { activeAccountId = accounts[0].id; await ensureSandboxFunds(activeAccountId); return activeAccountId; }
-    } catch {}
+    // Открывает (или возвращает уже открытый) ПЕРСОНАЛЬНЫЙ счёт песочницы для userKey.
+  // Ключ userKey = id пользователя (или стабильный clientId для анонимов).
+  async function openSandbox(userKey = 'anon') {
+    // Если в env зафиксирован один счёт — используем его (демо-режим, общий).
+    if (FIXED_ACCOUNT_ID) {
+      accountByUser.set(userKey, FIXED_ACCOUNT_ID);
+      await ensureSandboxFunds(FIXED_ACCOUNT_ID);
+      return FIXED_ACCOUNT_ID;
+    }
+    const cached = accountByUser.get(userKey);
+    if (cached) {
+      await ensureSandboxFunds(cached);
+      return cached;
+    }
+    // Новый пользователь → свой собственный счёт песочницы.
     const data = await investCall('SandboxService/OpenSandboxAccount', {});
     const accountId = data?.accountId;
     if (!accountId) throw new Error('SANDBOX_ACCOUNT_NOT_CREATED');
-    activeAccountId = accountId;
+    accountByUser.set(userKey, accountId);
     await investCall('SandboxService/SandboxPayIn', { accountId, amount: { currency: 'rub', units: '100000', nano: 0 } });
     return accountId;
   }
