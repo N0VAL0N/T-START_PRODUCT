@@ -35,6 +35,8 @@ export default function App() {
   const setIsDark = useUserStore((s) => s.setIsDark);
   const hasHydrated = useUserStore((s) => s._hasHydrated);
   const onboardingDone = useUserStore((s) => s.onboardingDone);
+  const serverUser = useUserStore((s) => s.serverUser);
+  const completeOnboarding = useUserStore((s) => s.completeOnboarding);
   const trackEventAction = useUserStore((s) => s.trackEvent);
   const executeTradeAction = useUserStore((s) => s.executeTrade);
   const updateAvatarAction = useUserStore((s) => s.updateAvatar);
@@ -74,6 +76,18 @@ export default function App() {
     if (hasHydrated && userData) syncOutfits();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasHydrated]);
+
+  // Fallback-создание локального профиля, чтобы НЕ зацикливать онбординг:
+  // - auth==='disabled' (аккаунты выключены на сервере): создаём локального игрока;
+  // - auth==='ok', но данных нет (вошёл, а IndexedDB пустой): создаём из логина.
+  useEffect(() => {
+    if (!hasHydrated || !onboardingDone || userData) return;
+    if (auth === 'disabled') {
+      completeOnboarding('Инвестор', 'Просто попробовать');
+    } else if (auth === 'ok') {
+      completeOnboarding(serverUser?.username || 'Инвестор', 'Просто попробовать');
+    }
+  }, [hasHydrated, onboardingDone, userData, auth, serverUser, completeOnboarding]);
 
   const trackEvent = (eventName) => trackEventAction(eventName);
 
@@ -119,9 +133,10 @@ export default function App() {
         /* 2. Если онбординг пройден, но не авторизован — Auth. */
         <Auth onAuthed={() => { setAuth('ok'); }} />
       ) : !userData ? (
-        /* 3. Пограничный случай: онбординг/вход пройдены, но локальных данных нет —
-              показываем онбординг (создаст данные после завершения). */
-        <Onboarding />
+        /* 3. Данных ещё нет — эффект выше создаст локальный профиль (без цикла онбординга). */
+        <div className={`min-h-screen flex items-center justify-center ${isDark ? 'bg-[#121212]' : 'bg-gray-50'}`}>
+          <div className="w-10 h-10 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+        </div>
       ) : (
         /* 4. Основное приложение. */
         <Suspense fallback={<PageFallback />}>

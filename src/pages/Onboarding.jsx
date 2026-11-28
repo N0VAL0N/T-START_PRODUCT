@@ -41,14 +41,19 @@ const ProgressDots = ({ current, total, onDotClick }) => (
 
 // Общий каркас шага:
 // - mobile: картинка сверху, текст под ней (блоки друг под другом);
-// - desktop (md+): текст слева у левого края, картинка справа.
+// - desktop (md+): текст слева, картинка прижата к правому краю (отступ 5–10%).
 const StepLayout = ({ image, imageAlt = '', children }) => (
-  <div className="flex-1 w-full flex flex-col md:flex-row md:items-center md:justify-between gap-6 md:gap-12">
-    <div className="order-2 md:order-1 flex flex-col text-left w-full md:flex-1 md:max-w-xl">
+  <div className="flex-1 w-full flex flex-col md:flex-row md:items-center md:justify-between gap-6 md:gap-8">
+        <div className="order-2 md:order-1 flex flex-col text-left w-full md:flex-1 md:max-w-2xl md:pl-[6%]">
       {children}
     </div>
-    <div className="order-1 md:order-2 flex-shrink-0 flex justify-center md:justify-end">
-      <img src={image} alt={imageAlt} className="w-48 h-48 md:w-80 md:h-80 object-contain" loading="eager" />
+    <div className="order-1 md:order-2 flex-shrink-0 flex justify-center md:justify-end md:pr-[6%] w-full md:w-auto">
+      <img
+        src={image}
+        alt={imageAlt}
+        className="w-48 h-48 md:w-[clamp(240px,30vw,600px)] md:h-[clamp(240px,30vw,600px)] object-contain"
+        loading="eager"
+      />
     </div>
   </div>
 );
@@ -137,9 +142,10 @@ const Step6Content = ({ onNext, onSkip, onDotClick }) => {
   const [goalName, setGoalName] = useState('');
   const [goalSum, setGoalSum] = useState('');
 
-  const handleSumChange = (e) => {
-    const val = e.target.value;
-    if (val === '' || Number(val) >= 0) setGoalSum(val);
+    const handleSumChange = (e) => {
+    // Только неотрицательные цифры (и точка/запятая). Минус отбрасываем сразу.
+    let val = e.target.value.replace(/-/g, '').replace(',', '.');
+    if (val === '' || (/^\d*\.?\d*$/.test(val) && Number(val) >= 0)) setGoalSum(val);
   };
 
   return (
@@ -153,11 +159,18 @@ const Step6Content = ({ onNext, onSkip, onDotClick }) => {
         </div>
         <div>
           <label className="text-xs text-gray-500 ml-1">Сумма</label>
-          <input type="number" placeholder="Например, 5000" value={goalSum} onChange={handleSumChange} className="w-full p-3 rounded-xl bg-white dark:bg-[#1e1e1e] border border-gray-200 dark:border-gray-800 text-gray-900 dark:text-white outline-none focus:border-yellow-500" />
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="Например, 5000"
+            value={goalSum}
+            onChange={handleSumChange}
+            className="w-full p-3 rounded-xl bg-white dark:bg-[#1e1e1e] border border-gray-200 dark:border-gray-800 text-gray-900 dark:text-white outline-none focus:border-yellow-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          />
         </div>
       </div>
       <div className="flex flex-col gap-3">
-        <GradientButton onClick={onNext}>Сохранить цель</GradientButton>
+        <GradientButton onClick={() => onNext({ name: goalName.trim(), sum: goalSum })}>Сохранить цель</GradientButton>
         <GradientButton onClick={onSkip} isPrimary={false}>Позже</GradientButton>
       </div>
       <ProgressDots current={6} total={7} onDotClick={onDotClick} />
@@ -176,18 +189,27 @@ const Step7Content = ({ onNext, onDotClick }) => (
 
 // --- ГЛАВНЫЙ КОМПОНЕНТ ---
 
+
+
+
 export default function Onboarding() {
   const [step, setStep] = useState(1);
   const setOnboardingDone = useUserStore((s) => s.setOnboardingDone);
+  const setOnboardingGoal = useUserStore((s) => s.setOnboardingGoal);
 
   // Завершение онбординга: только ставим флаг. App увидит onboardingDone=true
   // и покажет экран входа — без ручной навигации (раньше navigate('/auth') давал
   // «битый» URL и падал, т.к. роута /auth нет).
-  const finish = () => {
+
+    const finish = () => {
     setOnboardingDone();
   };
 
-  const handleNext = () => {
+  const handleNext = (payload) => {
+    // Шаг 6 присылает объект цели { name, sum } — сохраняем его в стор.
+    if (step === 6 && payload && typeof payload === 'object') {
+      setOnboardingGoal({ name: payload.name, sum: payload.sum });
+    }
     if (step < 7) setStep(step + 1);
     else finish();
   };
@@ -221,11 +243,11 @@ export default function Onboarding() {
         <Logo />
       </div>
 
-      {/* Один адаптивный контейнер:
+            {/* Один адаптивный контейнер на всю ширину:
           - mobile: контент в колонку (картинка сверху, текст под ней);
-          - desktop: текст слева у левого края, картинка справа. */}
-      <div className="flex-1 flex items-center pt-20 pb-10 px-4 md:px-10">
-        <div className="w-full max-w-6xl">
+          - desktop: текст слева, картинка прижата к правому краю (отступ ~6%). */}
+      <div className="flex-1 flex items-center pt-20 pb-10 px-4 md:px-0">
+        <div className="w-full">
           {renderStep()}
         </div>
       </div>

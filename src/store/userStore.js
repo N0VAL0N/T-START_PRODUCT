@@ -62,6 +62,7 @@ function normalizeUserData(data) {
   return {
     name: data.name || 'Инвестор',
     goal: data.goal || 'Накопить на мечту',
+    goalSum: Number(data.goalSum) || 0,
     avatar: data.avatar || null,
     balance: Number(data.balance) || 0,
     portfolio: Number(data.portfolio) || 0,
@@ -103,6 +104,17 @@ export const useUserStore = create(
 
       // ---------- онбординг / пользователь ----------
       setOnboardingDone: () => set({ onboardingDone: true }),
+      // Цель из онбординга (название + сумма). Сохраняем до создания userData,
+      // затем переносим в userData.goal / userData.goalSum.
+      onboardingGoal: null,
+      setOnboardingGoal: (goal) => set((s) => {
+        const next = goal || null;
+        // Если профиль уже есть — обновляем цель сразу.
+        if (s.userData && next) {
+          return { onboardingGoal: next, userData: { ...s.userData, goal: next.name || s.userData.goal, goalSum: next.sum || s.userData.goalSum } };
+        }
+        return { onboardingGoal: next };
+      }),
       setUser: (user) => set({ serverUser: user || null }),
 
       // Кэш живых котировок (НЕ персистится — только текущая сессия).
@@ -119,27 +131,33 @@ export const useUserStore = create(
 
       // ---------- онбординг ----------
       completeOnboarding: (name, goal) =>
-        set({
-          userData: {
-            name,
-            goal,
-            avatar: null,
-            balance: 1000,
-            portfolio: 0,
-            deals: 0,
-            daysStreak: 0,
-            profitability: 0,
-            analytics: [],
-            portfolioStocks: [],
-            chaptersDone: [],
-            sandboxAccountId: null,
-            friendInvites: [],
-            accountMode: 'sandbox',
-            cardMask: null,
-            activeOutfit: 'default',
-            unlockedOutfits: initialOutfits(),
-            tournamentBestPlace: null,
-          },
+        set((s) => {
+          const og = s.onboardingGoal || null;
+          const finalGoal = og?.name || goal || 'Накопить на мечту';
+          const finalGoalSum = Number(og?.sum) || 0;
+          return {
+            userData: {
+              name,
+              goal: finalGoal,
+              goalSum: finalGoalSum,
+              avatar: null,
+              balance: 1000,
+              portfolio: 0,
+              deals: 0,
+              daysStreak: 0,
+              profitability: 0,
+              analytics: [],
+              portfolioStocks: [],
+              chaptersDone: [],
+              sandboxAccountId: null,
+              friendInvites: [],
+              accountMode: 'sandbox',
+              cardMask: null,
+              activeOutfit: 'default',
+              unlockedOutfits: initialOutfits(),
+              tournamentBestPlace: null,
+            },
+          };
         }),
 
       // ---------- аналитика (с лимитом) ----------
