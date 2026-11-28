@@ -336,7 +336,12 @@ export default function Story({ userData, trackEvent, chaptersDone = [], onChapt
                           : 'bg-white dark:bg-[#1e1e1e]/90 border-yellow-300 dark:border-yellow-900/30 hover:border-yellow-500/80 cursor-pointer shadow-[0_0_30px_rgba(250,204,21,0.05)]'
                     }`}
                   >
-                    <div className={`absolute inset-0 opacity-20 pointer-events-none ${done ? 'bg-gradient-to-br from-green-900/50 to-transparent' : 'bg-gradient-to-br from-yellow-900/30 to-transparent'}`}></div>
+                    {/* Фон карточки из JSON (ch.image) + затемняющий градиент для читаемости. */}
+                    <div
+                      className="absolute inset-0 bg-cover bg-center opacity-25 pointer-events-none"
+                      style={ch.image ? { backgroundImage: `url(${ch.image})` } : undefined}
+                    />
+                    <div className={`absolute inset-0 opacity-40 pointer-events-none ${done ? 'bg-gradient-to-br from-green-900/50 to-transparent' : 'bg-gradient-to-br from-yellow-900/30 to-transparent'}`}></div>
 
                     <div className="p-5 md:p-6 relative z-10">
                       <div className="flex items-start justify-between mb-2">
@@ -353,7 +358,7 @@ export default function Story({ userData, trackEvent, chaptersDone = [], onChapt
                         {ch.title}
                       </h3>
                       <p className={`text-xs md:text-sm ${locked ? 'text-gray-500 dark:text-gray-600' : 'text-gray-500 dark:text-gray-400'}`}>
-                        {locked ? 'Сначала заверши предыдущую главу' : ch.short}
+                        {locked ? 'Сначала заверши предыдущую главу' : (ch.description || ch.short)}
                       </p>
 
                       <div className={`grid transition-all duration-300 ${expanded === ch.id ? 'grid-rows-[1fr] opacity-100 mt-4' : 'grid-rows-[0fr] opacity-0'}`}>

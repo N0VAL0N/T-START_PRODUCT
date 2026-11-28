@@ -241,6 +241,32 @@ async function handler(req, res) {
       return send(res, 501, { error: 'MCP_NOT_CONFIGURED', note: 'Реальный счёт (MCP) будет добавлен отдельным этапом.' });
     }
 
+    // Эндпоинт для свечей
+    if (path === '/api/invest/candles') {
+      const ticker = url.searchParams.get('ticker');
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+      const interval = url.searchParams.get('interval') || 'CANDLE_INTERVAL_DAY';
+      const candles = await invest.getCandles(ticker, from, to, interval);
+      return send(res, 200, { candles });
+    }
+
+    // Эндпоинт для бренда
+    if (path.startsWith('/api/invest/brand/')) {
+      const ticker = path.split('/').pop();
+      const brand = await invest.getBrand(ticker);
+      return send(res, 200, brand || {});
+    }
+
+    // Обновленный эндпоинт для списка акций (только торгуемые)
+    if (path === '/api/shares') {
+      const all = await invest.getTradableShares();
+      return send(res, 200, {
+        count: all.length,
+        shares: all.map(s => ({ ticker: s.ticker, name: s.name, lot: s.lot, classCode: s.classCode })),
+      });
+    }
+
     if (!path.startsWith('/api/') && serveStatic(path, res)) return;
 
     return send(res, 404, { error: 'NOT_FOUND', path });
@@ -248,6 +274,7 @@ async function handler(req, res) {
     console.error('[api error]', path, e.message);
     return send(res, 500, { error: e.message });
   }
+
 }
 
 const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

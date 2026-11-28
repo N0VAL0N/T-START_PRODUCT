@@ -32,9 +32,10 @@ export function createInvest({ httpsJson, config }) {
       if (!i.ticker) continue;
       if (i.apiTradeAvailableFlag === false) continue;
       const key = i.ticker.toUpperCase();
-      const item = {
+            const item = {
         ticker: key, name: i.name || key, uid: i.uid, figi: i.figi,
         lot: Number(i.lot || 1), classCode: i.classCode || null, currency: i.currency || 'rub',
+        apiTradeAvailableFlag: i.apiTradeAvailableFlag !== false,
       };
       const prev = byTicker.get(key);
       if (!prev || (item.classCode === 'TQBR' && prev.classCode !== 'TQBR')) byTicker.set(key, item);
@@ -183,9 +184,43 @@ export function createInvest({ httpsJson, config }) {
     return found;
   }
 
+  async function getCandles(ticker, from, to, interval = 'CANDLE_INTERVAL_DAY') {
+    const share = await getShare(ticker);
+    const instrumentId = share.uid || share.figi;
+    const data = await investCall('MarketDataService/GetCandles', {
+      instrumentId,
+      from: new Date(from).toISOString(),
+      to: new Date(to).toISOString(),
+      interval,
+    });
+    return (data?.candles || []).map(c => ({
+      time: c.time,
+      open: fromQ(c.open),
+      high: fromQ(c.high),
+      low: fromQ(c.low),
+      close: fromQ(c.close),
+    }));
+  }
+
+  async function getBrand(ticker) {
+    const share = await getShare(ticker);
+    const brandUid = share.brand?.uid;
+    if (!brandUid) return null;
+    const data = await investCall('InstrumentsService/GetBrandBy', { id: brandUid });
+    return data?.brand || null;
+  }
+
+  // Фильтруем акции, у которых нет цены или торговля недоступна
+  async function getTradableShares() {
+    const all = await getAllShares();
+    // В T-Invest API есть флаг apiTradeAvailableFlag
+    return all.filter(s => s.apiTradeAvailableFlag !== false);
+  }
+
   return {
     investCall, getAllShares, getShare, getLastPrice, computeRisk, getQuote,
     listSandboxAccounts, getRubBalance, ensureSandboxFunds, openSandbox,
-    sandboxPayIn, getPortfolio, resolveTradeableShare,
+    sandboxPayIn, getPortfolio, resolveTradeableShare, getCandles, getBrand,
+    getTradableShares,
   };
 }

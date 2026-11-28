@@ -24,17 +24,20 @@ export function useMarket({ userData } = {}) {
 
   const observerTarget = useRef(null);
   const isLoadingRef = useRef(false);
+  const noPriceRef = useRef(new Set());
 
   // Загрузка цен пачками (CHUNK × MAX_PARALLEL), без дублей.
   const loadPrices = async (tickersToLoad) => {
-    if (isLoadingRef.current || !tickersToLoad.length) return;
+    // Дёргаем только тикеры без цены, не помеченные как «без цены».
+    const toLoad = tickersToLoad.filter((t) => !noPriceRef.current.has(t));
+    if (isLoadingRef.current || !toLoad.length) return;
     isLoadingRef.current = true;
     setRefreshing(true);
 
     try {
       const chunks = [];
-      for (let i = 0; i < tickersToLoad.length; i += CHUNK) {
-        chunks.push(tickersToLoad.slice(i, i + CHUNK));
+      for (let i = 0; i < toLoad.length; i += CHUNK) {
+        chunks.push(toLoad.slice(i, i + CHUNK));
       }
 
       for (let i = 0; i < chunks.length; i += MAX_PARALLEL) {
@@ -42,7 +45,10 @@ export function useMarket({ userData } = {}) {
         const results = await Promise.all(group.map((chunk) => fetchQuotes(chunk)));
         setPricesMap((prev) => {
           const next = { ...prev };
-          results.flat().forEach((q) => { next[q.ticker] = q; });
+          results.flat().forEach((q) => {
+            next[q.ticker] = q;
+            if (q.price == null) noPriceRef.current.add(q.ticker);
+          });
           return next;
         });
       }
@@ -84,7 +90,7 @@ export function useMarket({ userData } = {}) {
           setVisibleCount(nextVisible);
           const currentVisibleTickers = allTickers.slice(0, nextVisible);
           const missingTickers = currentVisibleTickers
-            .filter((s) => !pricesMap[s.ticker])
+            .filter((s) => !pricesMap[s.ticker] && !noPriceRef.current.has(s.ticker))
             .map((s) => s.ticker);
           if (missingTickers.length > 0) loadPrices(missingTickers);
         }
