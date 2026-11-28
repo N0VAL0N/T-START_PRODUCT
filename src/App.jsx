@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -6,7 +6,7 @@ import Dashboard from './pages/Dashboard';
 import Onboarding from './pages/Onboarding';
 import Auth from './pages/Auth';
 import { openSandboxAccount } from './services/invest';
-import { getMe } from './api/auth';
+import { getMe, putState } from './api/auth';
 import { useUserStore } from './store/userStore';
 
 const Market = lazy(() => import('./pages/Market'));
@@ -76,6 +76,36 @@ export default function App() {
     if (hasHydrated && userData) syncOutfits();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasHydrated]);
+
+  // ---- Авто-синхронизация прогресса с сервером (user_state) ----
+  // Сохраняем «начинку» профиля (баланс/цели/песочница/достижения) в БД
+  // (debounce), только когда пользователь авторизован. При входе на другом
+  // устройстве Auth подтянет этот state из /api/me.
+  const SYNC_FIELDS = [
+    'balance', 'portfolio', 'portfolioStocks', 'deals', 'chaptersDone',
+    'achievements', 'champion', 'unlockedOutfits', 'profitability', 'daysStreak',
+    'goal', 'goalSum', 'sandboxAccountId', 'accountMode', 'cardMask',
+    'activeOutfit', 'tournamentBestPlace', 'friendInvites', 'analytics',
+  ];
+  const lastSyncRef = useRef('');
+  const syncTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (auth !== 'ok' || !hasHydrated || !userData) return;
+    const snapshot = {};
+    for (const k of SYNC_FIELDS) if (userData[k] !== undefined) snapshot[k] = userData[k];
+    const serialized = JSON.stringify(snapshot);
+    if (serialized === lastSyncRef.current) return; // ничего не изменилось
+    lastSyncRef.current = serialized;
+
+    clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      putState(snapshot).catch(() => { /* офлайн/ошибка — не мешаем игре */ });
+    }, 1200);
+
+    return () => clearTimeout(syncTimerRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userData, auth, hasHydrated]);
 
   // Fallback-создание локального профиля, чтобы НЕ зацикливать онбординг:
   // - auth==='disabled' (аккаунты выключены на сервере): создаём локального игрока;

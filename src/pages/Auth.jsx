@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, LogIn, UserPlus, AlertTriangle, Eye, EyeOff } from 'lucide-react';
-import { login, register } from '../api/auth';
+
+import { login, register, getMe } from '../api/auth';
 import { useUserStore } from '../store/userStore';
 
 
@@ -20,6 +21,7 @@ export default function Auth({ onAuthed }) {
   const setOnboardingDone = useUserStore((s) => s.setOnboardingDone);
   const completeOnboarding = useUserStore((s) => s.completeOnboarding);
   const setSandboxAccountId = useUserStore((s) => s.setSandboxAccountId);
+  const setUserData = useUserStore((s) => s.setUserData);
   const hasUserData = useUserStore((s) => !!s.userData);
 
   async function onSubmit(e) {
@@ -36,15 +38,30 @@ export default function Auth({ onAuthed }) {
       const data = await fn(username, password);
       setUser(data.user);
       setOnboardingDone();
-      // Создаём локальное состояние игрока только при первом входе,
-      // чтобы не затирать уже существующий прогресс.
-      if (!hasUserData) {
+
+      // Подтягиваем «начинку» аккаунта (баланс/цели/песочница/достижения) с сервера.
+      let serverState = null;
+      try {
+        const me = await getMe();
+        if (me?.state && Object.keys(me.state).length) serverState = me.state;
+      } catch { /* если не удалось — работаем локально */ }
+
+      if (serverState) {
+        // У аккаунта уже есть прогресс — восстанавливаем его (в т.ч. на новом устройстве).
+        setUserData({
+          ...(useUserStore.getState().userData || {}),
+          name: data.user?.username || username,
+          ...serverState,
+        });
+      } else if (!hasUserData) {
+        // Первый вход, прогресса нет — создаём новое локальное состояние.
         completeOnboarding(data.user?.username || username, 'Просто попробовать');
       } else {
-        // Профиль уже есть: сбрасываем счёт песочницы — сервер выдаст
-        // персональный счёт под ЭТОГО пользователя (привязка по userKey).
+        // Локальные данные есть, серверных нет — сбрасываем счёт песочницы:
+        // сервер выдаст персональный под текущего пользователя.
         setSandboxAccountId(null);
       }
+
       // Переключаем App на основное приложение (не ждём navigate).
       if (typeof onAuthed === 'function') onAuthed();
       navigate('/', { replace: true });

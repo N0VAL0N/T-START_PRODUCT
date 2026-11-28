@@ -15,6 +15,9 @@
 const STATE_WHITELIST = [
   'balance', 'portfolio', 'portfolioStocks', 'deals', 'chaptersDone',
   'achievements', 'champion', 'unlockedOutfits', 'profitability', 'daysStreak',
+  // начинка/цели/песочница — тоже принадлежат профилю
+  'goal', 'goalSum', 'sandboxAccountId', 'accountMode', 'cardMask',
+  'activeOutfit', 'tournamentBestPlace', 'friendInvites', 'analytics',
 ];
 
 import { randomUUID } from 'node:crypto';
@@ -62,6 +65,9 @@ export function createAccounts({ config }) {
     const id = randomUUID();
     const passHash = hashPassword(password);
     await query('INSERT INTO users (id, username, pass_hash) VALUES ($1, $2, $3)', [id, v.username, passHash]);
+    // Сразу создаём пустую «начинку», привязанную к пользователю (1:1 по user_id),
+    // чтобы прогресс (баланс/цели/песочница/достижения) всегда было куда писать.
+    await query(`INSERT INTO user_state (user_id, data) VALUES ($1, '{}'::jsonb) ON CONFLICT (user_id) DO NOTHING`, [id]);
     return { status: 200, body: { user: { id, username: v.username } }, setSession: { uid: id, username: v.username } };
   }
 
